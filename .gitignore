@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# spotify caches
+.spotipy-cache
+.librespot-cache

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import pyaudio
+import subprocess
 
 from dotenv import load_dotenv
 from google import genai
@@ -11,8 +12,8 @@ from tools import get_tools
 
 load_dotenv()
 audio = pyaudio.PyAudio()
-# model = "gemini-2.0-flash-live-001"
-model = "gemini-2.5-flash-preview-native-audio-dialog"
+model = "gemini-2.0-flash-live-001"
+# model = "gemini-2.5-flash-preview-native-audio-dialog"
 
 
 
@@ -67,6 +68,11 @@ async def play_audio(audio_output_queue: asyncio.Queue):
 
 
 async def main(event_loop: asyncio.AbstractEventLoop):
+
+    print("Starting librespot...")
+    subprocess.Popen(
+        ["librespot.exe", "--name", "Alex Assistant", "--enable-oauth", "--system-cache", ".librespot-cache"],
+    )
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     sessions = []
     tools = { tool.__name__: tool for tool in get_tools(event_loop, sessions) }
@@ -95,9 +101,12 @@ async def main(event_loop: asyncio.AbstractEventLoop):
                 if chunk.tool_call:
                     function_responses = []
                     for fc in chunk.tool_call.function_calls:
+                        print(f"Calling {fc.name} with {fc.args}")
+                        result = tools[fc.name](**fc.args)
+                        print(f"Result: {result}")
                         function_response = FunctionResponse(
                             id=fc.id,
-                            response=tools[fc.name](**fc.args)
+                            response=result
                         )
                         function_responses.append(function_response)
 
