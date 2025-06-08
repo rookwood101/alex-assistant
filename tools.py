@@ -1,6 +1,7 @@
 import asyncio
+from dataclasses import dataclass
 from random import randint
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 from functools import wraps
 import os
 import spotipy
@@ -9,6 +10,14 @@ from spotipy.cache_handler import CacheFileHandler
 from google.genai.live import AsyncSession
 import time
 import vlc
+
+@dataclass
+class NowPlayingInfo:
+    state: Literal["playing", "paused", "stopped"]
+    platform: str | None
+    capabilities: list[Literal["play", "pause", "stop", "skip_next", "skip_previous"]]
+    track: str | None = None
+    artist: str | None = None
 
 
 def get_tools(event_loop: asyncio.AbstractEventLoop, sessions: list[AsyncSession]) -> list[Callable]:
@@ -37,6 +46,12 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, sessions: list[AsyncSession
             event_loop.create_task(func(*args, **kwargs))
             return None
         return wrapper
+    
+    now_playing = NowPlayingInfo(
+        state="stopped",
+        platform=None,
+        capabilities=[]
+    )
 
     @async_tool
     async def set_timer(name: str, hours: int, minutes: int, seconds: int, context: str = ""):
@@ -89,7 +104,7 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, sessions: list[AsyncSession
             A dictionary containing the status and what's playing
         """
         if device_id is None:
-            return {"status": "error", "message": "Error: Playback device not found."}
+            return {"status": "error", "message": "Playback device not found."}
             
         # Search for the track
         if type == "all":
@@ -122,7 +137,7 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, sessions: list[AsyncSession
             now_playing_response = f"Now playing episode \"{item['name']}\" from a podcast"
             uri = item["uri"]
         else:
-            return {"status": "error", "message": "Error: No results found for that spotify query"}
+            return {"status": "error", "message": "No results found for that spotify query"}
         
         # Start playback
         try:
@@ -132,7 +147,7 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, sessions: list[AsyncSession
                 sp.start_playback(device_id=device_id, context_uri=uri)
             return {"status": "success", "message": now_playing_response}
         except Exception as e:
-            return {"status": "error", "message": f"Error: Unknown error. Cannot play spotify. Please try again. Details: {str(e)}"}
+            return {"status": "error", "message": f"Unknown error. Cannot play spotify. Please try again. Details: {str(e)}"}
 
     def stop() -> dict:
         """Stop any current audio output or event. If the user asks to "Stop" or "Pause" you should use this tool. For music or anything.
