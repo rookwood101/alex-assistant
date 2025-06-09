@@ -1,5 +1,5 @@
-* Timers - make them work offline somehow
+* Timers - make them wake up gemini when they are due
 * Calendar integration
 * radio stop/resume/spotify integration
 * session resumption
-* can't control+c
+* wakeword only works once
