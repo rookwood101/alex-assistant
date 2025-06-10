@@ -1,7 +1,7 @@
 import asyncio
 from dataclasses import dataclass, asdict
 from random import randint
-from typing import Any, Awaitable, Callable, Literal, Optional
+from typing import Any, Awaitable, Callable, Literal, Optional, Dict
 from functools import wraps
 import os
 import spotipy
@@ -58,6 +58,21 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
         capabilities=[],
     )
 
+    # Dictionary to store active timers and their end timestamps keyed by display name
+    timers: Dict[str, float] = {}
+
+    def _generate_unique_display_name(base_name: str) -> str:
+        """Generate a unique, human-readable display name (e.g., bread, bread 2, bread 3)."""
+        if base_name.strip() == "":
+            base_name = "timer"
+        if base_name not in timers:
+            return base_name
+        # Find next numeric suffix
+        suffix = 2
+        while f"{base_name} {suffix}" in timers:
+            suffix += 1
+        return f"{base_name} {suffix}"
+
     def _clear_controls():
         now_playing.stop = None
         now_playing.resume = None
@@ -111,8 +126,14 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
         Remember to always tell the user which timer has finished and how long it was.
         """
         duration_seconds = hours * 3600 + minutes * 60 + seconds
+        # Determine a unique display name for this timer (handle duplicates)
+        display_name = _generate_unique_display_name(name)
+        # Store end time for status queries
+        timers[display_name] = time.time() + duration_seconds
         await asyncio.sleep(duration_seconds)
-        message = f"<system>Tell the user that their {hours} hour {minutes} minute {seconds} second {name} timer finished! and {context}</system>"
+        message = f"<system>Tell the user that their {hours} hour {minutes} minute {seconds} second {display_name} timer finished! and {context}</system>"
+        # Remove finished timer from tracking
+        timers.pop(display_name, None)
         await event_queue.put(message)
 
     def get_current_temperature(city: str, country: str = "United Kingdom") -> dict:
@@ -341,7 +362,24 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
 
         return {"status": "success", "message": description}
 
+    def get_timer_status() -> dict:
+        """Return a summary of all active timers and their remaining time."""
+        # Clean up any expired timers that may not yet have been removed
+        now_ts = time.time()
+        expired_keys = [k for k, end in timers.items() if end <= now_ts]
+        for k in expired_keys:
+            timers.pop(k, None)
+        if not timers:
+            return {"status": "success", "message": "No timers currently set."}
+        status_lines: list[str] = []
+        for tname, end in timers.items():
+            remaining = int(end - now_ts)
+            hrs, rem = divmod(remaining, 3600)
+            mins, secs = divmod(rem, 60)
+            status_lines.append(f'"{tname}": {hrs}h {mins}m {secs}s remaining')
+        return {"status": "success", "message": "Active timers: " + "; ".join(status_lines)}
+
     vlc_instance = vlc.Instance('--no-xlib')  # Use --no-xlib to avoid X11 dependency on headless systems
     vlc_media_player = vlc_instance.media_player_new()
 
-    return [set_timer, get_current_temperature, play_spotify, stop, resume_music, skip_track, play_radio_station, get_now_playing]
+    return [set_timer, get_current_temperature, play_spotify, stop, resume_music, skip_track, play_radio_station, get_now_playing, get_timer_status]
