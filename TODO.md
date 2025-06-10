@@ -1,4 +1,3 @@
-* Timers - make them wake up gemini when they are due
 * Ensure system prompt includes
     - Upcoming calendar events for this week
     - Weather for today and next 7 days in home town

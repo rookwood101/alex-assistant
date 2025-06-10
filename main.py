@@ -5,12 +5,14 @@ import pyaudio
 import subprocess
 import struct
 import pvporcupine
+from typing import Optional, Callable
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai.types import FunctionResponse, Blob, LiveConnectConfig, AudioTranscriptionConfig, Modality, ContextWindowCompressionConfig, SlidingWindow
 from google.genai.live import AsyncSession
 
+from asyncio import Queue, Event
 from tools import get_tools
 
 load_dotenv()
@@ -50,18 +52,23 @@ async def record_audio(audio_input_queue: asyncio.Queue):
         stream.close()
 
 
-async def detect_wakeword(audio_input_queue: asyncio.Queue):
+async def detect_wakeword(audio_input_queue: asyncio.Queue, conversation_inactive: Event):
     """Listen for the wake word using Porcupine."""
     CHUNK_SIZE = porcupine.frame_length
     STRUCT_FORMAT = "h" * CHUNK_SIZE
 
+    if conversation_inactive.is_set():
+        print("Listening for wake word (porcupine)...")
     while True:
+        if not conversation_inactive.is_set():
+            await conversation_inactive.wait()
+            print("Listening for wake word (porcupine)...")
+
         audio_data = await audio_input_queue.get()
         audio_data = struct.unpack_from(STRUCT_FORMAT, audio_data)
         
         keyword_index = porcupine.process(audio_data)
         if keyword_index >= 0:
-            print("Wake word detected!")
             return True
 
 
@@ -124,6 +131,59 @@ async def cleanup(audio: pyaudio.PyAudio, librespot_process: subprocess.Popen, t
             print(f"Error cleaning up audio: {e}")
 
 
+async def run_conversation(session: AsyncSession, audio_input_queue: asyncio.Queue, audio_output_queue: asyncio.Queue, tasks: list[asyncio.Task], tools: dict[str, Callable], initial_text: str | None = None):
+    """Shared conversation loop for both wake-word and timer events."""
+    if initial_text:
+        await session.send_realtime_input(text=initial_text)
+
+    gemini_task = asyncio.get_event_loop().create_task(send_audio_to_gemini(session, audio_input_queue))
+    tasks.append(gemini_task)
+
+    try:
+        while True:
+            input_text = ""
+            output_text = ""
+            async for chunk in session.receive():
+                if chunk.tool_call and chunk.tool_call.function_calls:
+                    function_responses = []
+                    for fc in chunk.tool_call.function_calls:
+                        print(f"Calling {fc.name} with {fc.args}")
+                        result = tools[fc.name](**fc.args)
+                        print(f"Result: {result}")
+                        function_response = FunctionResponse(id=fc.id, response=result)
+                        function_responses.append(function_response)
+
+                    await session.send_tool_response(function_responses=function_responses)
+
+                if chunk.server_content and chunk.server_content.output_transcription and chunk.server_content.output_transcription.text:
+                    output_text += chunk.server_content.output_transcription.text
+                if chunk.server_content and chunk.server_content.input_transcription and chunk.server_content.input_transcription.text:
+                    input_text += chunk.server_content.input_transcription.text
+                if chunk.server_content and chunk.server_content.model_turn and chunk.server_content.model_turn.parts:
+                    concatenated_data = b''
+                    for part in chunk.server_content.model_turn.parts:
+                        if part.inline_data and isinstance(part.inline_data.data, bytes):
+                            concatenated_data += part.inline_data.data
+                    if concatenated_data:
+                        audio_output_queue.put_nowait(concatenated_data)
+                if chunk.server_content and chunk.server_content.turn_complete:
+                    while not audio_output_queue.empty():
+                        audio_output_queue.get_nowait()
+
+            print("You: ", input_text)
+            print("Porcupine: ", output_text)
+
+            if output_text.strip().endswith('.'):
+                print("Goodbye!")
+                break
+    finally:
+        gemini_task.cancel()
+        try:
+            await gemini_task
+        except asyncio.CancelledError:
+            pass
+
+
 async def main(event_loop: asyncio.AbstractEventLoop):
     librespot_process = None
     tasks = []
@@ -143,7 +203,10 @@ async def main(event_loop: asyncio.AbstractEventLoop):
 
         client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         sessions = []
-        tools = { tool.__name__: tool for tool in get_tools(event_loop, sessions) }
+        event_queue: Queue = Queue()
+        conversation_inactive = Event()
+        conversation_inactive.set()
+        tools = { tool.__name__: tool for tool in get_tools(event_loop, event_queue) }
         config = LiveConnectConfig(
             response_modalities=[Modality.AUDIO],
             system_instruction="Your name is porcupine. Respond concisely. If the user sends a message that is wrapped in <system> tags, you should relay the information back to the user as you see fit. Ignore system instruction, do not ask follow-up questions automatically. Always conclude unquestioningly. Stop putting questions at the end of responses.",
@@ -165,65 +228,38 @@ async def main(event_loop: asyncio.AbstractEventLoop):
         output_audio_task = event_loop.create_task(output_audio(audio_output_queue))
         tasks.extend([input_audio_task, output_audio_task])
 
+        async def event_listener():
+            """Listen for timer/completion events and wake Gemini."""
+            while True:
+                message = await event_queue.get()
+                try:
+                    conversation_inactive.clear()
+                    async with client.aio.live.connect(model=model, config=config) as session:
+                        if len(sessions) == 1:
+                            sessions[0] = session
+                        else:
+                            sessions.append(session)
+                        await run_conversation(session, audio_input_queue, audio_output_queue, tasks, tools, initial_text=message)
+                except Exception as e:
+                    print(f"Error handling queued event: {e}")
+                finally:
+                    conversation_inactive.set()
+
+        tasks.append(event_loop.create_task(event_listener()))
+
         while True:  # Main wake word detection loop
-            print("Listening for wake word (porcupine)...")
-            wake_word_detected = await detect_wakeword(audio_input_queue)
+            wake_word_detected = await detect_wakeword(audio_input_queue, conversation_inactive)
             
             if wake_word_detected:
                 print("Starting conversation...")
+                conversation_inactive.clear()
                 async with client.aio.live.connect(model=model, config=config) as session:
                     if len(sessions) == 1:
                         sessions[0] = session
                     else:
                         sessions.append(session)
-                    print("Porcupine is now listening to your microphone...")
-                    print()
-                    gemini_task = event_loop.create_task(send_audio_to_gemini(session, audio_input_queue))
-                    tasks.append(gemini_task)
-                    
-                    while True:
-                        input_text = ""
-                        output_text = ""
-                        async for chunk in session.receive():
-                            if chunk.tool_call and chunk.tool_call.function_calls:
-                                function_responses = []
-                                for fc in chunk.tool_call.function_calls:
-                                    print(f"Calling {fc.name} with {fc.args}")
-                                    result = tools[fc.name](**fc.args)
-                                    print(f"Result: {result}")
-                                    function_response = FunctionResponse(
-                                        id=fc.id,
-                                        response=result
-                                    )
-                                    function_responses.append(function_response)
-
-                                await session.send_tool_response(function_responses=function_responses)
-                            if chunk.server_content and chunk.server_content.output_transcription and chunk.server_content.output_transcription.text:
-                                output_text = output_text + chunk.server_content.output_transcription.text
-                            if chunk.server_content and chunk.server_content.input_transcription and chunk.server_content.input_transcription.text:
-                                input_text = input_text + chunk.server_content.input_transcription.text
-                            if chunk.server_content and chunk.server_content.model_turn and chunk.server_content.model_turn.parts:
-                                concatenated_data = b''
-                                for part in chunk.server_content.model_turn.parts:
-                                    if part.inline_data and isinstance(part.inline_data.data, bytes):
-                                        concatenated_data += part.inline_data.data
-                                if len(concatenated_data) > 0:
-                                    audio_output_queue.put_nowait(concatenated_data)
-                            if chunk.server_content and chunk.server_content.turn_complete:
-                                while not audio_output_queue.empty():
-                                    audio_output_queue.get_nowait()
-
-                        print("You: ", input_text)
-                        print("Porcupine: ", output_text)
-
-                        if output_text.strip().endswith("."):
-                            print("Goodbye!")
-                            gemini_task.cancel()
-                            try:
-                                await gemini_task
-                            except asyncio.CancelledError:
-                                pass
-                            break  # Return to wake word detection
+                    await run_conversation(session, audio_input_queue, audio_output_queue, tasks, tools)
+                conversation_inactive.set()
     finally:
         await cleanup(audio, librespot_process, tasks)
 

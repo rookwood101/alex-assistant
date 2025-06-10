@@ -10,6 +10,7 @@ from spotipy.cache_handler import CacheFileHandler
 from google.genai.live import AsyncSession
 import time
 import vlc
+from asyncio import Queue
 
 @dataclass
 class NowPlayingInfo:
@@ -25,8 +26,7 @@ class NowPlayingInfo:
     skip_prev: Optional[Callable[[], None]] = None
 
 
-def get_tools(event_loop: asyncio.AbstractEventLoop, sessions: list[AsyncSession]) -> list[Callable]:
-    """There's always only one session, it's just it's a list because the session won't be available immediately"""
+def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list[Callable]:
     
     # Initialize Spotify client
     sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
@@ -112,10 +112,8 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, sessions: list[AsyncSession
         """
         duration_seconds = hours * 3600 + minutes * 60 + seconds
         await asyncio.sleep(duration_seconds)
-        await sessions[0].send_realtime_input(
-            text=f"<system>Tell the user that their {hours} hour {minutes} minute {seconds} second {name} timer finished! and <context>{context}</context></system>"
-        )
-        return {"status": "success", "message": f"Timer '{name}' set for {hours}h {minutes}m {seconds}s."}
+        message = f"<system>Tell the user that their {hours} hour {minutes} minute {seconds} second {name} timer finished! and {context}</system>"
+        await event_queue.put(message)
 
     def get_current_temperature(city: str, country: str = "United Kingdom") -> dict:
         """Gets the current temperature for a given location.
