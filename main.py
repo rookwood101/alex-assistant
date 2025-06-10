@@ -16,11 +16,13 @@ from tools import get_tools
 load_dotenv()
 audio = pyaudio.PyAudio()
 model = "gemini-2.0-flash-live-001"
+# model = "gemini-2.5-flash-preview-native-audio-dialog"
 
 # Initialize Porcupine with the "bumblebee" keyword
 porcupine = pvporcupine.create(
     access_key=os.environ["PICOVOICE_ACCESS_KEY"],
-    keywords=["porcupine"]
+    keywords=["porcupine"],
+    sensitivities=[0.7], # TODO: tune
 )
 
 
@@ -154,7 +156,7 @@ async def main(event_loop: asyncio.AbstractEventLoop):
             input_audio_transcription=AudioTranscriptionConfig(),
             context_window_compression=ContextWindowCompressionConfig(
                 sliding_window=SlidingWindow(target_tokens=1000),
-            )
+            ),
         )
 
         audio_input_queue = asyncio.Queue()
@@ -208,7 +210,6 @@ async def main(event_loop: asyncio.AbstractEventLoop):
                                         concatenated_data += part.inline_data.data
                                 if len(concatenated_data) > 0:
                                     audio_output_queue.put_nowait(concatenated_data)
-
                             if chunk.server_content and chunk.server_content.turn_complete:
                                 while not audio_output_queue.empty():
                                     audio_output_queue.get_nowait()
