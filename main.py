@@ -188,15 +188,14 @@ async def main(event_loop: asyncio.AbstractEventLoop):
                             if chunk.tool_call and chunk.tool_call.function_calls:
                                 function_responses = []
                                 for fc in chunk.tool_call.function_calls:
-                                    if fc.name and fc.args:
-                                        print(f"Calling {fc.name} with {fc.args}")
-                                        result = tools[fc.name](**fc.args)
-                                        print(f"Result: {result}")
-                                        function_response = FunctionResponse(
-                                            id=fc.id,
-                                            response=result
-                                        )
-                                        function_responses.append(function_response)
+                                    print(f"Calling {fc.name} with {fc.args}")
+                                    result = tools[fc.name](**fc.args)
+                                    print(f"Result: {result}")
+                                    function_response = FunctionResponse(
+                                        id=fc.id,
+                                        response=result
+                                    )
+                                    function_responses.append(function_response)
 
                                 await session.send_tool_response(function_responses=function_responses)
                             if chunk.server_content and chunk.server_content.output_transcription and chunk.server_content.output_transcription.text:
