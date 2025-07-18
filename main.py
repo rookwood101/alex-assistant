@@ -200,9 +200,11 @@ async def main(event_loop: asyncio.AbstractEventLoop):
         )
         librespot_timeout = time.time() + 30 # 30 seconds timeout for librespot to start
         while time.time() < librespot_timeout:
-                line = librespot_process.stderr.readline().decode('utf-8')
-                if "Authenticated as" in line:
-                    break
+            line = librespot_process.stderr.readline().decode('utf-8')
+            print(line)
+            if "Authenticated as" in line:
+                break
+        print("Librespot started")
 
         client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         sessions = []
