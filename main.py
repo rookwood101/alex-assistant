@@ -227,11 +227,15 @@ async def main(event_loop: asyncio.AbstractEventLoop):
             ),
         )
 
+        print("Connected to Gemini")
+
         audio_input_queue = asyncio.Queue()
         audio_output_queue = asyncio.Queue()
         input_audio_task = event_loop.create_task(record_audio(audio_input_queue))
         output_audio_task = event_loop.create_task(output_audio(audio_output_queue))
         tasks.extend([input_audio_task, output_audio_task])
+
+        print("Started audio tasks")
 
         async def event_listener():
             """Listen for timer/completion events and wake Gemini."""
@@ -252,6 +256,9 @@ async def main(event_loop: asyncio.AbstractEventLoop):
 
         tasks.append(event_loop.create_task(event_listener()))
 
+        print("Started event listener")
+
+        print("Starting main loop")
         while True:  # Main wake word detection loop
             wake_word_detected = await detect_wakeword(audio_input_queue, conversation_inactive)
             
