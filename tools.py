@@ -10,7 +10,7 @@ from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import CacheFileHandler
 from google.genai.live import AsyncSession
 import time
-import subprocess
+import vlc
 from asyncio import Queue
 
 @dataclass
@@ -20,7 +20,6 @@ class NowPlayingInfo:
     capabilities: list[Literal["play", "pause", "stop", "skip_next", "skip_previous"]]
     track: str | None = None
     artist: str | None = None
-    last_url: str | None = None  # Store last URL for resume functionality
     # Generic control functions for the active platform
     stop: Optional[Callable[[], None]] = None
     resume: Optional[Callable[[], None]] = None
@@ -103,14 +102,13 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
 
     def _set_radio_controls():
         def _stop():
-            stop_mpv()
+            vlc_media_player.pause()
             now_playing.state = "paused"
             now_playing.capabilities = ["play", "stop"]
         def _resume():
-            if now_playing.last_url:
-                start_mpv(now_playing.last_url)
-                now_playing.state = "playing"
-                now_playing.capabilities = ["pause", "stop"]
+            vlc_media_player.play()
+            now_playing.state = "playing"
+            now_playing.capabilities = ["pause", "stop"]
         _clear_controls()
         now_playing.stop = _stop
         now_playing.resume = _resume
@@ -261,13 +259,14 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
                 now_playing.stop()
             except Exception as e:
                 return {"status": "error", "message": f"Failed to stop existing playback: {str(e)}"}
-        if not start_mpv(url):
-            return {"status": "error", "message": "Failed to start mpv. Install mpv: sudo apt install mpv (or choco install mpv on Windows)"}
+        vlc_media_player.stop()
+        media = vlc_instance.media_new(url)
+        vlc_media_player.set_media(media)
+        vlc_media_player.play()
         # Update now_playing for radio
         now_playing.state = "playing"
         now_playing.platform = "radio"
         now_playing.capabilities = ["pause", "stop"]
-        now_playing.last_url = url
         now_playing.track = station.title()
         now_playing.artist = None
         # Set radio callbacks
@@ -382,36 +381,29 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
             status_lines.append(f'"{tname}": {hrs}h {mins}m {secs}s remaining')
         return {"status": "success", "message": "Active timers: " + "; ".join(status_lines)}
 
-    # Global mpv process variable
-    mpv_process = None
-
-    def start_mpv(url):
-        """Start mpv with given URL"""
-        nonlocal mpv_process
-        stop_mpv()  # Stop any existing playback
-        try:
-            mpv_process = subprocess.Popen(
-                ['mpv', '--no-video', '--quiet', url],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            return True
-        except Exception:
-            return False
-
-    def stop_mpv():
-        """Stop mpv playback"""
-        nonlocal mpv_process
-        if mpv_process and mpv_process.poll() is None:
-            mpv_process.terminate()
+    # Platform-specific VLC arguments
+    if platform.system() == "Windows":
+        vlc_instance = vlc.Instance('--intf', 'dummy')
+    else:
+        # Try multiple configurations for Raspberry Pi
+        vlc_args = [
+            ['--no-xlib', '--intf', 'dummy', '--aout', 'alsa'],
+            ['--no-xlib', '--intf', 'dummy'],
+            ['--intf', 'dummy', '--aout', 'pulse'],
+            ['--intf', 'dummy'],
+            []  # Minimal fallback
+        ]
+        vlc_instance = None
+        for args in vlc_args:
             try:
-                mpv_process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                mpv_process.kill()
-        mpv_process = None
-
-    def is_mpv_playing():
-        """Check if mpv is currently playing"""
-        return mpv_process and mpv_process.poll() is None
+                vlc_instance = vlc.Instance(*args)
+                if vlc_instance is not None:
+                    break
+            except Exception:
+                continue
+    
+    if vlc_instance is None:
+        raise RuntimeError("Failed to initialize VLC instance. Install VLC: sudo apt install vlc-bin vlc-plugin-base")
+    vlc_media_player = vlc_instance.media_player_new()
 
     return [set_timer, get_current_temperature, play_spotify, stop, resume_music, skip_track, play_radio_station, get_now_playing, get_timer_status]
