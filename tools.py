@@ -4,6 +4,7 @@ from random import randint
 from typing import Any, Awaitable, Callable, Literal, Optional, Dict
 from functools import wraps
 import os
+import platform
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import CacheFileHandler
@@ -380,7 +381,11 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
             status_lines.append(f'"{tname}": {hrs}h {mins}m {secs}s remaining')
         return {"status": "success", "message": "Active timers: " + "; ".join(status_lines)}
 
-    vlc_instance = vlc.Instance('--no-xlib', '--intf', 'dummy', '--aout', 'alsa')  # Headless audio-only mode
+    # Platform-specific VLC arguments
+    if platform.system() == "Windows":
+        vlc_instance = vlc.Instance('--intf', 'dummy')
+    else:
+        vlc_instance = vlc.Instance('--no-xlib', '--intf', 'dummy', '--aout', 'alsa')  # Headless Linux/RPi
     if vlc_instance is None:
         raise RuntimeError("Failed to initialize VLC instance. Install VLC or check audio system.")
     vlc_media_player = vlc_instance.media_player_new()
