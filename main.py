@@ -1,5 +1,6 @@
 import asyncio
 import os
+import platform
 import time
 import pyaudio
 import subprocess
@@ -17,7 +18,8 @@ from tools import get_tools
 
 load_dotenv()
 audio = pyaudio.PyAudio()
-model = "gemini-2.0-flash-live-001"
+model = "gemini-live-2.5-flash-preview"
+# model = "gemini-2.0-flash-live-001"
 # model = "gemini-2.5-flash-preview-native-audio-dialog"
 
 # Initialize Porcupine with the "bumblebee" keyword
@@ -190,8 +192,9 @@ async def main(event_loop: asyncio.AbstractEventLoop):
     
     try:
         print("Starting librespot...")
+        librespot_executable = "librespot.exe" if platform.system() == "Windows" else "librespot"
         librespot_process = subprocess.Popen(
-            ["librespot.exe", "--name", "Alex Assistant", "--enable-oauth", "--system-cache", ".librespot-cache"],
+            [librespot_executable, "--name", "Alex Assistant", "--enable-oauth", "--system-cache", ".librespot-cache"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
