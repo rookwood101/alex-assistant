@@ -35,6 +35,7 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
         redirect_uri="http://127.0.0.1:8888/callback",
         scope="user-read-playback-state user-modify-playback-state",
         cache_handler=CacheFileHandler(cache_path=".spotipy-cache"),
+        requests_timeout=10,
     ))
     
     # Find the librespot device
