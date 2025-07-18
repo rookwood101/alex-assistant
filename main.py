@@ -18,8 +18,8 @@ from tools import get_tools
 
 load_dotenv()
 audio = pyaudio.PyAudio()
-model = "gemini-live-2.5-flash-preview"
-# model = "gemini-2.0-flash-live-001"
+# model = "gemini-live-2.5-flash-preview"
+model = "gemini-2.0-flash-live-001"
 # model = "gemini-2.5-flash-preview-native-audio-dialog"
 
 # Initialize Porcupine with the "bumblebee" keyword
