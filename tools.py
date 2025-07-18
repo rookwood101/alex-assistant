@@ -385,9 +385,25 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
     if platform.system() == "Windows":
         vlc_instance = vlc.Instance('--intf', 'dummy')
     else:
-        vlc_instance = vlc.Instance('--no-xlib', '--intf', 'dummy', '--aout', 'alsa')  # Headless Linux/RPi
+        # Try multiple configurations for Raspberry Pi
+        vlc_args = [
+            ['--no-xlib', '--intf', 'dummy', '--aout', 'alsa'],
+            ['--no-xlib', '--intf', 'dummy'],
+            ['--intf', 'dummy', '--aout', 'pulse'],
+            ['--intf', 'dummy'],
+            []  # Minimal fallback
+        ]
+        vlc_instance = None
+        for args in vlc_args:
+            try:
+                vlc_instance = vlc.Instance(*args)
+                if vlc_instance is not None:
+                    break
+            except Exception:
+                continue
+    
     if vlc_instance is None:
-        raise RuntimeError("Failed to initialize VLC instance. Install VLC or check audio system.")
+        raise RuntimeError("Failed to initialize VLC instance. Install VLC: sudo apt install vlc-bin vlc-plugin-base")
     vlc_media_player = vlc_instance.media_player_new()
 
     return [set_timer, get_current_temperature, play_spotify, stop, resume_music, skip_track, play_radio_station, get_now_playing, get_timer_status]
