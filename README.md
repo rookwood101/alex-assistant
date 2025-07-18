@@ -2,4 +2,6 @@
 2. Install uv (astral.sh)
 3. Run `librespot --name Alex Assistant --enable-oauth --system-cache .librespot-cache`
 4. Open the link and then copy the url you are redirected to and curl it on the raspberry pi in a separate terminal session
+5. Run on headed OS and copy .spotipy-cache to raspberrypi
+6. Install libvlc-dev
 uv run main.py

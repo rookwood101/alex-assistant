@@ -380,7 +380,9 @@ def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list
             status_lines.append(f'"{tname}": {hrs}h {mins}m {secs}s remaining')
         return {"status": "success", "message": "Active timers: " + "; ".join(status_lines)}
 
-    vlc_instance = vlc.Instance('--no-xlib')  # Use --no-xlib to avoid X11 dependency on headless systems
+    vlc_instance = vlc.Instance('--no-xlib', '--intf', 'dummy', '--aout', 'alsa')  # Headless audio-only mode
+    if vlc_instance is None:
+        raise RuntimeError("Failed to initialize VLC instance. Install VLC or check audio system.")
     vlc_media_player = vlc_instance.media_player_new()
 
     return [set_timer, get_current_temperature, play_spotify, stop, resume_music, skip_track, play_radio_station, get_now_playing, get_timer_status]
