@@ -256,7 +256,7 @@ async def detect_wakeword(audio_input_queue: asyncio.Queue, conversation_inactiv
     CHUNK_SIZE = porcupine.frame_length
     STRUCT_FORMAT = "h" * CHUNK_SIZE
 
-    spinner = Halo(text="Listening for wake word", spinner="dots")
+    spinner = Halo(text="Listening for wake word (porcupine)...", spinner="dots")
     
     if conversation_inactive.is_set():
         spinner.start()
