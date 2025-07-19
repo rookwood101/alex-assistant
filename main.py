@@ -22,15 +22,15 @@ from scipy import signal
 
 load_dotenv()
 audio = pyaudio.PyAudio()
-# model = "gemini-live-2.5-flash-preview"
-model = "gemini-2.0-flash-live-001"
+model = "gemini-live-2.5-flash-preview"
+# model = "gemini-2.0-flash-live-001"
 # model = "gemini-2.5-flash-preview-native-audio-dialog"
 
-# Initialize Porcupine with the "bumblebee" keyword
+# Initialize Porcupine with the "porcupine" keyword
 porcupine = pvporcupine.create(
     access_key=os.environ["PICOVOICE_ACCESS_KEY"],
     keywords=["porcupine"],
-    sensitivities=[0.7], # TODO: tune
+    sensitivities=[0.4], # TODO: tune
 )
 
 # Audio processing configuration
