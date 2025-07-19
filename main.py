@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai.types import FunctionResponse, Blob, LiveConnectConfig, AudioTranscriptionConfig, Modality, ContextWindowCompressionConfig, SlidingWindow
 from google.genai.live import AsyncSession
+from halo import Halo
 
 from asyncio import Queue, Event
 from tools import get_tools
@@ -255,18 +256,21 @@ async def detect_wakeword(audio_input_queue: asyncio.Queue, conversation_inactiv
     CHUNK_SIZE = porcupine.frame_length
     STRUCT_FORMAT = "h" * CHUNK_SIZE
 
+    spinner = Halo(text="Listening for wake word", spinner="dots")
+    
     if conversation_inactive.is_set():
-        print("Listening for wake word (porcupine)...")
+        spinner.start()
     while True:
         if not conversation_inactive.is_set():
+            spinner.stop()
             await conversation_inactive.wait()
-            print("Listening for wake word (porcupine)...")
-
+            spinner.start()
         audio_data = await audio_input_queue.get()
         audio_data = struct.unpack_from(STRUCT_FORMAT, audio_data)
         
         keyword_index = porcupine.process(audio_data)
         if keyword_index >= 0:
+            spinner.stop()
             return True
 
 
