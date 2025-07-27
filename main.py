@@ -164,6 +164,11 @@ ENABLE_AEC = IS_LINUX  # Enable acoustic echo cancellation on Linux/RPi
 # Echo cancellation configuration
 echo_buffer_size = 2048  # Buffer size for echo reference data
 
+def run_vad_inference(audio_float):
+    """Run VAD inference on audio data."""
+    audio_tensor = torch.from_numpy(audio_float)
+    return vad_model(audio_tensor, 16000).item()
+
 # Silero VAD model and utils
 try:
     vad_model, vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
@@ -253,7 +258,7 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
     return output.astype(np.int16)
 
 
-def apply_vad_silencing(audio_np):
+async def apply_vad_silencing(audio_np):
     """Apply Silero VAD-based silencing using VADIterator.
     
     Args:
@@ -263,7 +268,7 @@ def apply_vad_silencing(audio_np):
         numpy array of int16 processed audio data
     """
     
-    if vad_iterator is None:
+    if vad_model is None:
         # Fallback: pass through original audio if VAD not available
         led_controller.set_vad_active(True, 1.0)
         return audio_np
@@ -272,9 +277,8 @@ def apply_vad_silencing(audio_np):
     audio_float = audio_np.astype(np.float32) / 32768.0
     
     try:
-        # Use the VAD model directly for real-time processing
-        audio_tensor = torch.from_numpy(audio_float)
-        speech_prob = vad_model(audio_tensor, 16000).item()
+        # Run VAD in a separate thread to avoid blocking
+        speech_prob = await asyncio.to_thread(run_vad_inference, audio_float)
         
         # Print confidence for threshold tuning
         print(f"VAD confidence: {speech_prob:.3f}")
@@ -413,14 +417,12 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
                 )
 
                 # Then apply VAD-based silencing (pass numpy array directly)
-                # final_audio = apply_vad_silencing(enhanced_audio)  # Temporarily disabled
-                final_audio = enhanced_audio
+                final_audio = await apply_vad_silencing(enhanced_audio)
                 processed_data = final_audio.tobytes()
             else:
                 # Single channel: convert once and apply VAD-based silencing
                 audio_np = np.frombuffer(processed_data, dtype=np.int16)
-                # final_audio = apply_vad_silencing(audio_np)  # Temporarily disabled
-                final_audio = audio_np
+                final_audio = await apply_vad_silencing(audio_np)
                 processed_data = final_audio.tobytes()
 
             # Record processed audio for debug
