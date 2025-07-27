@@ -6,4 +6,4 @@
 * Add a tool that allows it to remember things (forever, or for a particular date), which then get added to system prompt
 
 * Tool for adding calendar event
-* Echo cancellation on rpi - does seed studio have it built in or do we do it in software?
+* Echo cancellation doesn't work well enough - need to only listen for wakeword while gemini is talking

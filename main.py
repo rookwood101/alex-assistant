@@ -145,8 +145,11 @@ def apply_vad_silencing(audio_data):
         try:
             if vad.is_speech(frame_bytes, 16000):
                 processed_audio.extend(frame)
+                print("Speech", end="")
             else:
                 # Silence non-speech frames completely (0%)
+                print("\r\033[K", end="")
+                print("Silence", end="")
                 processed_audio.extend(np.zeros_like(frame))
         except Exception:
             # If VAD fails, pass through original audio
