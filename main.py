@@ -80,7 +80,7 @@ model = "gemini-live-2.5-flash-preview"
 # model = "gemini-2.5-flash-preview-native-audio-dialog"
 
 # Initialize LED controller
-led_controller = LEDController(max_brightness=32)
+led_controller = LEDController(max_brightness=10)
 
 # Initialize Porcupine with the "porcupine" keyword
 porcupine = pvporcupine.create(
