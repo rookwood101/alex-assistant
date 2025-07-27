@@ -116,7 +116,7 @@ class LEDController:
                     self.dev.set_pixel(i, dim_intensity, 0, dim_intensity)
         else:
             # Dim blue when listening but no speech
-            dim_intensity = min(20, self.max_brightness * 0.1)  # Scale down dim blue relative to max brightness
+            dim_intensity = int(self.max_brightness * 0.1)  # Scale down dim blue relative to max brightness
             for i in range(3):
                 self.dev.set_pixel(i, 0, 0, dim_intensity)
         
