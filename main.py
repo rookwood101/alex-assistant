@@ -8,6 +8,8 @@ import struct
 import pvporcupine
 from typing import Callable
 import numpy as np
+import argparse
+import wave
 
 from dotenv import load_dotenv
 from google import genai
@@ -34,6 +36,55 @@ try:
     HAS_LEDS = True
 except ImportError:
     HAS_LEDS = False
+
+
+class DebugAudioRecorder:
+    """Records debug audio to WAV files when debug mode is enabled"""
+    
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+        self.unprocessed_frames = []
+        self.processed_frames = []
+        self.sample_rate = 16000
+        
+    def record_unprocessed(self, audio_data: bytes):
+        """Record unprocessed audio data"""
+        if self.enabled:
+            self.unprocessed_frames.append(audio_data)
+    
+    def record_processed(self, audio_data: bytes):
+        """Record processed audio data"""
+        if self.enabled:
+            self.processed_frames.append(audio_data)
+    
+    def save_recordings(self):
+        """Save recorded audio to disk"""
+        if not self.enabled:
+            return
+            
+        # Save unprocessed audio
+        if self.unprocessed_frames:
+            with wave.open('debug_unprocessed.wav', 'wb') as wf:
+                wf.setnchannels(2 if ENABLE_DUAL_CHANNEL else 1)
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(b''.join(self.unprocessed_frames))
+            print(f"Saved {len(self.unprocessed_frames)} unprocessed audio frames to debug_unprocessed.wav")
+        
+        # Save processed audio
+        if self.processed_frames:
+            with wave.open('debug_processed.wav', 'wb') as wf:
+                wf.setnchannels(1)  # Processed audio is always mono
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(b''.join(self.processed_frames))
+            print(f"Saved {len(self.processed_frames)} processed audio frames to debug_processed.wav")
+    
+    def clear_recordings(self):
+        """Clear recorded frames to free memory"""
+        if self.enabled:
+            self.unprocessed_frames.clear()
+            self.processed_frames.clear()
 
 
 class LEDController:
@@ -74,6 +125,12 @@ class LEDController:
 
 
 load_dotenv()
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Alex Assistant')
+parser.add_argument('--debug', action='store_true', help='Enable debug audio recording')
+args = parser.parse_args()
+
 audio = pyaudio.PyAudio()
 model = "gemini-live-2.5-flash-preview"
 # model = "gemini-2.0-flash-live-001"
@@ -81,6 +138,9 @@ model = "gemini-live-2.5-flash-preview"
 
 # Initialize LED controller
 led_controller = LEDController(max_brightness=10)
+
+# Initialize debug audio recorder
+debug_recorder = DebugAudioRecorder(enabled=args.debug)
 
 # Initialize Porcupine with the "porcupine" keyword
 porcupine = pvporcupine.create(
@@ -288,6 +348,9 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
         while True:
             audio_data = await asyncio.to_thread(stream.read, CHUNK_SIZE)
 
+            # Record unprocessed audio for debug
+            debug_recorder.record_unprocessed(audio_data)
+
             # STEP 1: Apply echo cancellation first
             if ENABLE_AEC and echo_reference_buffer:
                 processed_data = apply_echo_cancellation(
@@ -315,6 +378,9 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
             else:
                 # Single channel: just apply VAD-based silencing
                 processed_data = apply_vad_silencing(processed_data)
+
+            # Record processed audio for debug
+            debug_recorder.record_processed(processed_data)
 
             audio_input_queue.put_nowait(processed_data)
     finally:
@@ -390,6 +456,9 @@ async def cleanup(
     tasks: list[asyncio.Task],
 ):
     """Clean up resources."""
+    # Save debug recordings if enabled
+    debug_recorder.save_recordings()
+    
     # Turn off LEDs
     led_controller.off()
     
