@@ -39,8 +39,9 @@ except ImportError:
 class LEDController:
     """Elegant LED controller for VAD feedback"""
     
-    def __init__(self):
+    def __init__(self, max_brightness=128):
         self.enabled = HAS_LEDS
+        self.max_brightness = max_brightness
         if self.enabled:
             self.dev = apa102.APA102(num_led=3)
             self.off()
@@ -51,14 +52,15 @@ class LEDController:
             return
             
         if is_active:
-            # Purple pulse: R=128, G=0, B=128 (elegant purple)
-            intensity = int(128 + 127 * np.sin(time.time() * 8))  # Smooth pulse
+            # Purple pulse: R=max_brightness, G=0, B=max_brightness (elegant purple)
+            intensity = int(self.max_brightness + (self.max_brightness - 1) * np.sin(time.time() * 8))  # Smooth pulse
             for i in range(3):
                 self.dev.set_pixel(i, intensity, 0, intensity)
         else:
             # Dim blue when listening but no speech
+            dim_intensity = min(20, self.max_brightness // 6)  # Scale down dim blue relative to max brightness
             for i in range(3):
-                self.dev.set_pixel(i, 0, 0, 20)
+                self.dev.set_pixel(i, 0, 0, dim_intensity)
         
         self.dev.show()
     
@@ -78,7 +80,7 @@ model = "gemini-live-2.5-flash-preview"
 # model = "gemini-2.5-flash-preview-native-audio-dialog"
 
 # Initialize LED controller
-led_controller = LEDController()
+led_controller = LEDController(max_brightness=32)
 
 # Initialize Porcupine with the "porcupine" keyword
 porcupine = pvporcupine.create(
