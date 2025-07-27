@@ -272,31 +272,22 @@ def apply_vad_silencing(audio_np):
     audio_float = audio_np.astype(np.float32) / 32768.0
     
     try:
-        # Use basic VAD model directly for real-time processing
-        print("Before VAD")
-        audio_tensor = torch.from_numpy(audio_float)
+        # Use VADIterator which handles buffering and smoothing internally
+        speech_dict = vad_iterator(torch.from_numpy(audio_float), return_seconds=False)
         
-        # Use the VAD model directly instead of VADIterator
-        speech_prob = vad_model(audio_tensor, 16000).item()
-        print("After VAD", speech_prob)
-        
-        # Threshold for speech detection
-        speech_threshold = 0.5
-        
-        if speech_prob > speech_threshold:
-            # Speech detected
+        if speech_dict:
+            # Speech detected - VADIterator found speech in this chunk
             speech_detected = True
             volume_factor = 1.0
-            confidence = min(speech_prob, 1.0)  # Use actual probability as confidence
+            confidence = 0.8  # High confidence when VADIterator detects speech
         else:
             # No speech detected
             speech_detected = False
             volume_factor = 0.1  # 10% volume for non-speech
-            confidence = speech_prob
+            confidence = 0.2  # Low confidence
         
         # Apply volume scaling to the current chunk
         processed_audio = (audio_np * volume_factor).astype(np.int16)
-        print("VAD processing complete")
         
     except Exception as e:
         print(f"Silero VAD error: {e}")
@@ -306,11 +297,8 @@ def apply_vad_silencing(audio_np):
         confidence = 1.0
     
     # Update LED based on speech detection and confidence
-    print("Updating LEDs")
     led_controller.set_vad_active(speech_detected, confidence)
-    print("LEDs updated")
     
-    print("Returning processed audio")
     return processed_audio
 
 
@@ -390,27 +378,21 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
         )
 
         while True:
-            print("Reading audio chunk...")
             audio_data = await asyncio.to_thread(stream.read, CHUNK_SIZE)
-            print("Audio chunk read")
 
             # Record unprocessed audio for debug
             debug_recorder.record_unprocessed(audio_data)
 
             # STEP 1: Apply echo cancellation first
-            print("Applying echo cancellation...")
             if ENABLE_AEC and echo_reference_buffer:
                 processed_data = apply_echo_cancellation(
                     audio_data, echo_reference_buffer
                 )
             else:
                 processed_data = audio_data
-            print("Echo cancellation done")
 
             # STEP 2: Apply noise suppression and VAD-based silencing
-            print("Starting noise suppression and VAD...")
             if ENABLE_DUAL_CHANNEL:
-                print("Dual channel processing...")
                 # Convert to numpy array once
                 audio_np = np.frombuffer(processed_data, dtype=np.int16)
                 stereo_data = audio_np.reshape(-1, 2)
@@ -419,33 +401,23 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
                 right_channel = stereo_data[:, 1].astype(np.float32)
 
                 # Apply advanced dual-channel noise suppression
-                print("Applying dual channel noise suppression...")
                 enhanced_audio = apply_dual_channel_noise_suppression(
                     left_channel, right_channel
                 )
-                print("Dual channel noise suppression done")
 
                 # Then apply VAD-based silencing (pass numpy array directly)
-                print("Applying VAD silencing...")
                 final_audio = apply_vad_silencing(enhanced_audio)
-                print("VAD silencing done")
                 processed_data = final_audio.tobytes()
             else:
-                print("Single channel processing...")
                 # Single channel: convert once and apply VAD-based silencing
                 audio_np = np.frombuffer(processed_data, dtype=np.int16)
-                print("Applying VAD silencing...")
                 final_audio = apply_vad_silencing(audio_np)
-                print("VAD silencing done")
                 processed_data = final_audio.tobytes()
 
             # Record processed audio for debug
-            print("Recording processed audio...")
             debug_recorder.record_processed(processed_data)
 
-            print("Adding to queue...")
             audio_input_queue.put_nowait(processed_data)
-            print("Added to queue, looping...")
     finally:
         stream.stop_stream()
         stream.close()
