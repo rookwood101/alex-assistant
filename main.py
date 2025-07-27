@@ -273,7 +273,10 @@ def apply_vad_silencing(audio_np):
     
     try:
         # Use VADIterator which handles buffering and smoothing internally
+        print("Before VAD")
         speech_dict = vad_iterator(torch.from_numpy(audio_float), return_seconds=False)
+        print("After VAD", speech_dict)
+
         
         if speech_dict:
             # Speech detected - VADIterator found speech in this chunk
