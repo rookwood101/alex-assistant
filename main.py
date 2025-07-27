@@ -272,22 +272,27 @@ def apply_vad_silencing(audio_np):
     audio_float = audio_np.astype(np.float32) / 32768.0
     
     try:
-        # Use VADIterator which handles buffering and smoothing internally
+        # Use basic VAD model directly for real-time processing
         print("Before VAD")
-        speech_dict = vad_iterator(torch.from_numpy(audio_float), return_seconds=False)
-        print("After VAD", speech_dict)
-
+        audio_tensor = torch.from_numpy(audio_float)
         
-        if speech_dict:
-            # Speech detected - VADIterator found speech in this chunk
+        # Use the VAD model directly instead of VADIterator
+        speech_prob = vad_model(audio_tensor, 16000).item()
+        print("After VAD", speech_prob)
+        
+        # Threshold for speech detection
+        speech_threshold = 0.5
+        
+        if speech_prob > speech_threshold:
+            # Speech detected
             speech_detected = True
             volume_factor = 1.0
-            confidence = 0.8  # High confidence when VADIterator detects speech
+            confidence = min(speech_prob, 1.0)  # Use actual probability as confidence
         else:
             # No speech detected
             speech_detected = False
             volume_factor = 0.1  # 10% volume for non-speech
-            confidence = 0.2  # Low confidence
+            confidence = speech_prob
         
         # Apply volume scaling to the current chunk
         processed_audio = (audio_np * volume_factor).astype(np.int16)
