@@ -29,7 +29,6 @@ from asyncio import Queue, Event
 from tools import get_tools
 
 import torch
-torch.set_num_threads(1)  # Single thread for VAD processing
 
 # LED support for Raspberry Pi
 try:
