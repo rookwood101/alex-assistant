@@ -98,19 +98,25 @@ class LEDController:
             self.dev = apa102.APA102(num_led=3)
             self.off()
     
-    def set_vad_active(self, is_active: bool):
-        """Set LED state based on VAD activity"""
+    def set_vad_active(self, is_active: bool, confidence: float = 1.0):
+        """Set LED state based on VAD activity and confidence level"""
         if not self.enabled:
             return
             
         if is_active:
-            # Purple pulse: R=max_brightness, G=0, B=max_brightness (elegant purple)
-            intensity = int(self.max_brightness + (self.max_brightness - 1) * np.sin(time.time() * 8))  # Smooth pulse
-            for i in range(3):
-                self.dev.set_pixel(i, intensity, 0, intensity)
+            if confidence >= 0.7:
+                # High confidence: Full purple pulse
+                intensity = int(self.max_brightness + (self.max_brightness - 1) * np.sin(time.time() * 8))
+                for i in range(3):
+                    self.dev.set_pixel(i, intensity, 0, intensity)
+            else:
+                # Medium confidence: Dimmer purple (static, no pulse)
+                dim_intensity = int(self.max_brightness * 0.5)  # 40% brightness for medium confidence
+                for i in range(3):
+                    self.dev.set_pixel(i, dim_intensity, 0, dim_intensity)
         else:
             # Dim blue when listening but no speech
-            dim_intensity = min(20, self.max_brightness // 6)  # Scale down dim blue relative to max brightness
+            dim_intensity = min(20, self.max_brightness * 0.1)  # Scale down dim blue relative to max brightness
             for i in range(3):
                 self.dev.set_pixel(i, 0, 0, dim_intensity)
         
@@ -166,15 +172,12 @@ try:
                                           onnx=False)
     get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks = vad_utils
     vad_iterator = VADIterator(vad_model, threshold=0.5, sampling_rate=16000, 
-                               min_silence_duration_ms=300, speech_pad_ms=300)
+                               min_silence_duration_ms=100, speech_pad_ms=200)
 except Exception as e:
     print(f"Warning: Failed to initialize Silero VAD: {e}")
     vad_model = None
     vad_iterator = None
 
-# Circular buffer for rolling VAD confidence
-vad_buffer_size = 2048  # ~128ms at 16kHz
-vad_circular_buffer = np.zeros(vad_buffer_size, dtype=np.float32)
 
 
 def apply_dual_channel_noise_suppression(left_channel, right_channel):
@@ -251,7 +254,7 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
 
 
 def apply_vad_silencing(audio_np):
-    """Apply Silero VAD-based silencing with rolling confidence using circular buffer.
+    """Apply Silero VAD-based silencing using VADIterator.
     
     Args:
         audio_np: numpy array of int16 audio data
@@ -259,46 +262,29 @@ def apply_vad_silencing(audio_np):
     Returns:
         numpy array of int16 processed audio data
     """
-    global vad_circular_buffer
     
-    if vad_model is None or vad_iterator is None:
+    if vad_iterator is None:
         # Fallback: pass through original audio if VAD not available
-        led_controller.set_vad_active(True)
+        led_controller.set_vad_active(True, 1.0)
         return audio_np
 
     # Convert to float32 for processing
     audio_float = audio_np.astype(np.float32) / 32768.0
     
-    # Update circular buffer with new audio
-    buffer_start = len(audio_float)
-    if buffer_start <= vad_buffer_size:
-        # Shift existing data left and append new data
-        vad_circular_buffer[:-buffer_start] = vad_circular_buffer[buffer_start:]
-        vad_circular_buffer[-buffer_start:] = audio_float
-    else:
-        # New chunk is larger than buffer, use only the end
-        vad_circular_buffer[:] = audio_float[-vad_buffer_size:]
-    
-    # Process the entire buffer through Silero VAD for rolling confidence
     try:
-        buffer_tensor = torch.from_numpy(vad_circular_buffer.copy())
-        speech_prob = vad_model(buffer_tensor, 16000).item()
+        # Use VADIterator which handles buffering and smoothing internally
+        speech_dict = vad_iterator(torch.from_numpy(audio_float), return_seconds=False)
         
-        # Smooth confidence with threshold hysteresis
-        confidence_threshold = 0.5
-        low_threshold = 0.3  # Lower threshold for smoother transitions
-        
-        if speech_prob >= confidence_threshold:
+        if speech_dict:
+            # Speech detected - VADIterator found speech in this chunk
             speech_detected = True
-            volume_factor = 1.0  # Full volume for confident speech
-        elif speech_prob >= low_threshold:
-            speech_detected = True
-            # Gradual volume scaling between thresholds
-            volume_factor = 0.3 + 0.7 * ((speech_prob - low_threshold) / (confidence_threshold - low_threshold))
+            volume_factor = 1.0
+            confidence = 0.8  # High confidence when VADIterator detects speech
         else:
+            # No speech detected
             speech_detected = False
-            # Very low volume for non-speech, scaled by confidence
-            volume_factor = 0.05 + 0.25 * (speech_prob / low_threshold)
+            volume_factor = 0.1  # 10% volume for non-speech
+            confidence = 0.2  # Low confidence
         
         # Apply volume scaling to the current chunk
         processed_audio = (audio_np * volume_factor).astype(np.int16)
@@ -308,9 +294,10 @@ def apply_vad_silencing(audio_np):
         # Fallback: pass through original audio
         processed_audio = audio_np
         speech_detected = True
+        confidence = 1.0
     
-    # Update LED based on speech detection
-    led_controller.set_vad_active(speech_detected)
+    # Update LED based on speech detection and confidence
+    led_controller.set_vad_active(speech_detected, confidence)
     
     return processed_audio
 
