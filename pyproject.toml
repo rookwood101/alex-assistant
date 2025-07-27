@@ -15,4 +15,5 @@ dependencies = [
     "scipy>=1.11.0",
     "webrtcvad-wheels>=2.0.14",
     "halo>=0.0.31",
+    "apa102-pi>=2.5.3",
 ]
