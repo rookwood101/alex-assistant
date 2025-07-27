@@ -413,12 +413,14 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
                 )
 
                 # Then apply VAD-based silencing (pass numpy array directly)
-                final_audio = apply_vad_silencing(enhanced_audio)
+                # final_audio = apply_vad_silencing(enhanced_audio)  # Temporarily disabled
+                final_audio = enhanced_audio
                 processed_data = final_audio.tobytes()
             else:
                 # Single channel: convert once and apply VAD-based silencing
                 audio_np = np.frombuffer(processed_data, dtype=np.int16)
-                final_audio = apply_vad_silencing(audio_np)
+                # final_audio = apply_vad_silencing(audio_np)  # Temporarily disabled
+                final_audio = audio_np
                 processed_data = final_audio.tobytes()
 
             # Record processed audio for debug
