@@ -28,7 +28,8 @@ from halo import Halo
 from asyncio import Queue, Event
 from tools import get_tools
 
-import webrtcvad
+import torch
+torch.set_num_threads(1)  # Single thread for VAD processing
 
 # LED support for Raspberry Pi
 try:
@@ -157,13 +158,23 @@ ENABLE_AEC = IS_LINUX  # Enable acoustic echo cancellation on Linux/RPi
 # Echo cancellation configuration
 echo_buffer_size = 2048  # Buffer size for echo reference data
 
-# VAD instance for reuse (creating it each time is wasteful)
+# Silero VAD model and utils
 try:
-    vad_instance = webrtcvad.Vad()
-    vad_instance.set_mode(1) # 0 least aggressive, 3 most aggressive
+    vad_model, vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                          model='silero_vad',
+                                          force_reload=False,
+                                          onnx=False)
+    get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks = vad_utils
+    vad_iterator = VADIterator(vad_model, threshold=0.5, sampling_rate=16000, 
+                               min_silence_duration_ms=300, speech_pad_ms=300)
 except Exception as e:
-    print(f"Warning: Failed to initialize global VAD instance: {e}")
-    vad_instance = None
+    print(f"Warning: Failed to initialize Silero VAD: {e}")
+    vad_model = None
+    vad_iterator = None
+
+# Circular buffer for rolling VAD confidence
+vad_buffer_size = 2048  # ~128ms at 16kHz
+vad_circular_buffer = np.zeros(vad_buffer_size, dtype=np.float32)
 
 
 def apply_dual_channel_noise_suppression(left_channel, right_channel):
@@ -240,7 +251,7 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
 
 
 def apply_vad_silencing(audio_np):
-    """Apply VAD-based silencing - silence non-speech frames completely.
+    """Apply Silero VAD-based silencing with rolling confidence using circular buffer.
     
     Args:
         audio_np: numpy array of int16 audio data
@@ -248,44 +259,59 @@ def apply_vad_silencing(audio_np):
     Returns:
         numpy array of int16 processed audio data
     """
+    global vad_circular_buffer
+    
+    if vad_model is None or vad_iterator is None:
+        # Fallback: pass through original audio if VAD not available
+        led_controller.set_vad_active(True)
+        return audio_np
 
-    # For 16kHz, WebRTC VAD supports 10ms/20ms/30ms frames (160/320/480 samples)
-    # Use 480 samples (30ms) to efficiently handle 512-sample chunks
-    vad_frame_size = 480  # 30ms at 16kHz - more efficient for 512-sample chunks
-    processed_audio = np.zeros_like(audio_np)
-    speech_detected = False
-
-    # Process the 512-sample chunk using 480-sample VAD frame (leaves 32 samples)
-    for i in range(0, len(audio_np), vad_frame_size):
-        end_idx = min(i + vad_frame_size, len(audio_np))
-        frame = audio_np[i:end_idx]
+    # Convert to float32 for processing
+    audio_float = audio_np.astype(np.float32) / 32768.0
+    
+    # Update circular buffer with new audio
+    buffer_start = len(audio_float)
+    if buffer_start <= vad_buffer_size:
+        # Shift existing data left and append new data
+        vad_circular_buffer[:-buffer_start] = vad_circular_buffer[buffer_start:]
+        vad_circular_buffer[-buffer_start:] = audio_float
+    else:
+        # New chunk is larger than buffer, use only the end
+        vad_circular_buffer[:] = audio_float[-vad_buffer_size:]
+    
+    # Process the entire buffer through Silero VAD for rolling confidence
+    try:
+        buffer_tensor = torch.from_numpy(vad_circular_buffer.copy())
+        speech_prob = vad_model(buffer_tensor, 16000).item()
         
-        # Pad frame if needed for VAD processing
-        vad_frame = frame
-        if len(frame) < vad_frame_size:
-            vad_frame = np.pad(frame, (0, vad_frame_size - len(frame)))
-
-        frame_bytes = vad_frame.tobytes()
-        try:
-            # Use global VAD instance if available, otherwise create new one
-            current_vad = vad_instance
-            if current_vad is None:
-                current_vad = webrtcvad.Vad()
-                current_vad.set_mode(2)
-                
-            if current_vad.is_speech(frame_bytes, 16000):
-                processed_audio[i:end_idx] = frame
-                speech_detected = True
-            else:
-                # Silence non-speech frames completely (0%)
-                processed_audio[i:end_idx] = 0
-        except Exception as e:
-            # If VAD fails, pass through original audio
-            processed_audio[i:end_idx] = frame
-
+        # Smooth confidence with threshold hysteresis
+        confidence_threshold = 0.5
+        low_threshold = 0.3  # Lower threshold for smoother transitions
+        
+        if speech_prob >= confidence_threshold:
+            speech_detected = True
+            volume_factor = 1.0  # Full volume for confident speech
+        elif speech_prob >= low_threshold:
+            speech_detected = True
+            # Gradual volume scaling between thresholds
+            volume_factor = 0.3 + 0.7 * ((speech_prob - low_threshold) / (confidence_threshold - low_threshold))
+        else:
+            speech_detected = False
+            # Very low volume for non-speech, scaled by confidence
+            volume_factor = 0.05 + 0.25 * (speech_prob / low_threshold)
+        
+        # Apply volume scaling to the current chunk
+        processed_audio = (audio_np * volume_factor).astype(np.int16)
+        
+    except Exception as e:
+        print(f"Silero VAD error: {e}")
+        # Fallback: pass through original audio
+        processed_audio = audio_np
+        speech_detected = True
+    
     # Update LED based on speech detection
     led_controller.set_vad_active(speech_detected)
-
+    
     return processed_audio
 
 
