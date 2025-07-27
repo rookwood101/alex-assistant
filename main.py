@@ -160,7 +160,7 @@ echo_buffer_size = 2048  # Buffer size for echo reference data
 # VAD instance for reuse (creating it each time is wasteful)
 try:
     vad_instance = webrtcvad.Vad()
-    vad_instance.set_mode(2)  # Aggressive mode
+    vad_instance.set_mode(1) # 0 least aggressive, 3 most aggressive
 except Exception as e:
     print(f"Warning: Failed to initialize global VAD instance: {e}")
     vad_instance = None
