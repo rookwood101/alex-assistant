@@ -1,3 +1,5 @@
+An AI assistant like Alexa that can run on a raspberry pi and seeed studio 2 mic hat and is intelligent because it uses google gemini live. It's also effectively free.
+
 1. Install librespot - on raspberry pi use https://github.com/dtcooper/raspotify
 2. Install uv (astral.sh)
 3. Run `librespot --name Alex Assistant --enable-oauth --system-cache .librespot-cache`

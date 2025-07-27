@@ -132,24 +132,24 @@ def apply_vad_silencing(audio_data):
     vad = webrtcvad.Vad()
     vad.set_mode(2)  # Aggressive mode
 
-    # For 16kHz, we need 10ms frames = 160 samples
-    frame_size = 160  # 10ms at 16kHz
+    # For 16kHz, WebRTC VAD supports 10ms/20ms/30ms frames (160/320/480 samples)
+    # Use 480 samples (30ms) to efficiently handle 512-sample chunks
+    vad_frame_size = 480  # 30ms at 16kHz - more efficient for 512-sample chunks
     processed_audio = []
+    speech_detected = False
 
-    for i in range(0, len(audio_np), frame_size):
-        frame = audio_np[i : i + frame_size]
-        if len(frame) < frame_size:
-            frame = np.pad(frame, (0, frame_size - len(frame)))
+    # Process the 512-sample chunk using 480-sample VAD frame (leaves 32 samples)
+    for i in range(0, len(audio_np), vad_frame_size):
+        frame = audio_np[i : i + vad_frame_size]
+        if len(frame) < vad_frame_size:
+            frame = np.pad(frame, (0, vad_frame_size - len(frame)))
 
         frame_bytes = frame.astype(np.int16).tobytes()
         try:
             if vad.is_speech(frame_bytes, 16000):
                 processed_audio.extend(frame)
-                print("Speech", end="")
             else:
                 # Silence non-speech frames completely (0%)
-                print("\r\033[K", end="")
-                print("Silence", end="")
                 processed_audio.extend(np.zeros_like(frame))
         except Exception:
             # If VAD fails, pass through original audio
