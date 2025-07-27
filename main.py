@@ -157,6 +157,14 @@ ENABLE_AEC = IS_LINUX  # Enable acoustic echo cancellation on Linux/RPi
 # Echo cancellation configuration
 echo_buffer_size = 2048  # Buffer size for echo reference data
 
+# VAD instance for reuse (creating it each time is wasteful)
+try:
+    vad_instance = webrtcvad.Vad()
+    vad_instance.set_mode(2)  # Aggressive mode
+except Exception as e:
+    print(f"Warning: Failed to initialize global VAD instance: {e}")
+    vad_instance = None
+
 
 def apply_dual_channel_noise_suppression(left_channel, right_channel):
     """Apply advanced noise suppression using both microphone channels."""
@@ -209,8 +217,8 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
             secondary = left_channel
 
         # Spectral subtraction using secondary channel as noise reference
-        primary_fft = np.fft.fft(primary.astype(np.float32))
-        secondary_fft = np.fft.fft(secondary.astype(np.float32))
+        primary_fft = np.fft.fft(primary)
+        secondary_fft = np.fft.fft(secondary)
 
         # Estimate noise spectrum from secondary channel
         noise_magnitude = np.abs(secondary_fft)
@@ -231,43 +239,54 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
     return output.astype(np.int16)
 
 
-def apply_vad_silencing(audio_data):
-    """Apply VAD-based silencing - silence non-speech frames completely."""
-    # Convert to numpy array for processing
-    audio_np = np.frombuffer(audio_data, dtype=np.int16)
-
-    # WebRTC VAD for voice activity detection
-    vad = webrtcvad.Vad()
-    vad.set_mode(2)  # Aggressive mode
+def apply_vad_silencing(audio_np):
+    """Apply VAD-based silencing - silence non-speech frames completely.
+    
+    Args:
+        audio_np: numpy array of int16 audio data
+    
+    Returns:
+        numpy array of int16 processed audio data
+    """
 
     # For 16kHz, WebRTC VAD supports 10ms/20ms/30ms frames (160/320/480 samples)
     # Use 480 samples (30ms) to efficiently handle 512-sample chunks
     vad_frame_size = 480  # 30ms at 16kHz - more efficient for 512-sample chunks
-    processed_audio = []
+    processed_audio = np.zeros_like(audio_np)
     speech_detected = False
 
     # Process the 512-sample chunk using 480-sample VAD frame (leaves 32 samples)
     for i in range(0, len(audio_np), vad_frame_size):
-        frame = audio_np[i : i + vad_frame_size]
+        end_idx = min(i + vad_frame_size, len(audio_np))
+        frame = audio_np[i:end_idx]
+        
+        # Pad frame if needed for VAD processing
+        vad_frame = frame
         if len(frame) < vad_frame_size:
-            frame = np.pad(frame, (0, vad_frame_size - len(frame)))
+            vad_frame = np.pad(frame, (0, vad_frame_size - len(frame)))
 
-        frame_bytes = frame.astype(np.int16).tobytes()
+        frame_bytes = vad_frame.tobytes()
         try:
-            if vad.is_speech(frame_bytes, 16000):
-                processed_audio.extend(frame)
+            # Use global VAD instance if available, otherwise create new one
+            current_vad = vad_instance
+            if current_vad is None:
+                current_vad = webrtcvad.Vad()
+                current_vad.set_mode(2)
+                
+            if current_vad.is_speech(frame_bytes, 16000):
+                processed_audio[i:end_idx] = frame
                 speech_detected = True
             else:
                 # Silence non-speech frames completely (0%)
-                processed_audio.extend(np.zeros_like(frame))
-        except Exception:
+                processed_audio[i:end_idx] = 0
+        except Exception as e:
             # If VAD fails, pass through original audio
-            processed_audio.extend(frame)
+            processed_audio[i:end_idx] = frame
 
     # Update LED based on speech detection
     led_controller.set_vad_active(speech_detected)
 
-    return np.array(processed_audio, dtype=np.int16).tobytes()
+    return processed_audio
 
 
 def apply_echo_cancellation(mic_data, reference_buffer):
@@ -280,7 +299,7 @@ def apply_echo_cancellation(mic_data, reference_buffer):
     if not reference_data:
         return mic_data
 
-    # Convert to numpy arrays
+    # Convert to numpy arrays as float32 for processing
     mic_signal = np.frombuffer(mic_data, dtype=np.int16).astype(np.float32)
     ref_signal = np.frombuffer(reference_data, dtype=np.int16).astype(np.float32)
 
@@ -361,7 +380,7 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
 
             # STEP 2: Apply noise suppression and VAD-based silencing
             if ENABLE_DUAL_CHANNEL:
-                # Process dual channels for noise suppression
+                # Convert to numpy array once
                 audio_np = np.frombuffer(processed_data, dtype=np.int16)
                 stereo_data = audio_np.reshape(-1, 2)
 
@@ -373,11 +392,14 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
                     left_channel, right_channel
                 )
 
-                # Then apply VAD-based silencing
-                processed_data = apply_vad_silencing(enhanced_audio.tobytes())
+                # Then apply VAD-based silencing (pass numpy array directly)
+                final_audio = apply_vad_silencing(enhanced_audio)
+                processed_data = final_audio.tobytes()
             else:
-                # Single channel: just apply VAD-based silencing
-                processed_data = apply_vad_silencing(processed_data)
+                # Single channel: convert once and apply VAD-based silencing
+                audio_np = np.frombuffer(processed_data, dtype=np.int16)
+                final_audio = apply_vad_silencing(audio_np)
+                processed_data = final_audio.tobytes()
 
             # Record processed audio for debug
             debug_recorder.record_processed(processed_data)
