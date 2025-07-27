@@ -28,11 +28,57 @@ from tools import get_tools
 
 import webrtcvad
 
+# LED support for Raspberry Pi
+try:
+    import apa102
+    HAS_LEDS = True
+except ImportError:
+    HAS_LEDS = False
+
+
+class LEDController:
+    """Elegant LED controller for VAD feedback"""
+    
+    def __init__(self):
+        self.enabled = HAS_LEDS
+        if self.enabled:
+            self.dev = apa102.APA102(num_led=3)
+            self.off()
+    
+    def set_vad_active(self, is_active: bool):
+        """Set LED state based on VAD activity"""
+        if not self.enabled:
+            return
+            
+        if is_active:
+            # Purple pulse: R=128, G=0, B=128 (elegant purple)
+            intensity = int(128 + 127 * np.sin(time.time() * 8))  # Smooth pulse
+            for i in range(3):
+                self.dev.set_pixel(i, intensity, 0, intensity)
+        else:
+            # Dim blue when listening but no speech
+            for i in range(3):
+                self.dev.set_pixel(i, 0, 0, 20)
+        
+        self.dev.show()
+    
+    def off(self):
+        """Turn off all LEDs"""
+        if not self.enabled:
+            return
+        for i in range(3):
+            self.dev.set_pixel(i, 0, 0, 0)
+        self.dev.show()
+
+
 load_dotenv()
 audio = pyaudio.PyAudio()
 model = "gemini-live-2.5-flash-preview"
 # model = "gemini-2.0-flash-live-001"
 # model = "gemini-2.5-flash-preview-native-audio-dialog"
+
+# Initialize LED controller
+led_controller = LEDController()
 
 # Initialize Porcupine with the "porcupine" keyword
 porcupine = pvporcupine.create(
@@ -148,12 +194,16 @@ def apply_vad_silencing(audio_data):
         try:
             if vad.is_speech(frame_bytes, 16000):
                 processed_audio.extend(frame)
+                speech_detected = True
             else:
                 # Silence non-speech frames completely (0%)
                 processed_audio.extend(np.zeros_like(frame))
         except Exception:
             # If VAD fails, pass through original audio
             processed_audio.extend(frame)
+
+    # Update LED based on speech detection
+    led_controller.set_vad_active(speech_detected)
 
     return np.array(processed_audio, dtype=np.int16).tobytes()
 
@@ -338,6 +388,9 @@ async def cleanup(
     tasks: list[asyncio.Task],
 ):
     """Clean up resources."""
+    # Turn off LEDs
+    led_controller.off()
+    
     # Cancel all running tasks
     if tasks:
         for task in tasks:
