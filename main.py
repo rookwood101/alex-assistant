@@ -470,8 +470,11 @@ async def detect_wakeword(
     use_spinner = sys.stdout.isatty() and sys.stderr.isatty()
     spinner = Halo(text="Listening for wake word (porcupine)...", spinner="dots") if use_spinner else None
 
-    if conversation_inactive.is_set() and spinner:
-        spinner.start()
+    if conversation_inactive.is_set():
+        if spinner:
+            spinner.start()
+        else:
+            print("Listening for wake word (porcupine)...")
     while True:
         if not conversation_inactive.is_set():
             if spinner:
