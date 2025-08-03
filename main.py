@@ -28,7 +28,7 @@ from halo import Halo
 from asyncio import Queue, Event
 from tools import get_tools
 
-import torch
+# import torch
 
 # LED support for Raspberry Pi
 try:
@@ -163,10 +163,10 @@ ENABLE_AEC = IS_LINUX  # Enable acoustic echo cancellation on Linux/RPi
 # Echo cancellation configuration
 echo_buffer_size = 2048  # Buffer size for echo reference data
 
-def run_vad_inference(audio_float):
-    """Run VAD inference on audio data."""
-    audio_tensor = torch.from_numpy(audio_float)
-    return vad_model(audio_tensor, 16000).item()
+# def run_vad_inference(audio_float):
+#     """Run VAD inference on audio data."""
+#     audio_tensor = torch.from_numpy(audio_float)
+#     return vad_model(audio_tensor, 16000).item()
 
 # Silero VAD model and utils
 try:
@@ -261,59 +261,59 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
     return output.astype(np.int16)
 
 
-async def apply_vad_silencing(audio_np):
-    """Apply Silero VAD-based silencing using VADIterator.
+# async def apply_vad_silencing(audio_np):
+#     """Apply Silero VAD-based silencing using VADIterator.
     
-    Args:
-        audio_np: numpy array of int16 audio data
+#     Args:
+#         audio_np: numpy array of int16 audio data
     
-    Returns:
-        numpy array of int16 processed audio data
-    """
+#     Returns:
+#         numpy array of int16 processed audio data
+#     """
     
-    if vad_model is None:
-        # Fallback: pass through original audio if VAD not available
-        led_controller.set_vad_active(True, 1.0)
-        return audio_np
+#     if vad_model is None:
+#         # Fallback: pass through original audio if VAD not available
+#         led_controller.set_vad_active(True, 1.0)
+#         return audio_np
 
-    # Convert to float32 for processing
-    audio_float = audio_np.astype(np.float32) / 32768.0
+#     # Convert to float32 for processing
+#     audio_float = audio_np.astype(np.float32) / 32768.0
     
-    try:
-        # Run VAD in a separate thread to avoid blocking
-        speech_prob = await asyncio.to_thread(run_vad_inference, audio_float)
+#     try:
+#         # Run VAD in a separate thread to avoid blocking
+#         speech_prob = await asyncio.to_thread(run_vad_inference, audio_float)
         
-        # Print confidence for threshold tuning
-        print(f"VAD confidence: {speech_prob:.3f}")
+#         # Print confidence for threshold tuning
+#         print(f"VAD confidence: {speech_prob:.3f}")
         
-        # Threshold for speech detection
-        speech_threshold = 0.5
+#         # Threshold for speech detection
+#         speech_threshold = 0.5
         
-        if speech_prob > speech_threshold:
-            # Speech detected
-            speech_detected = True
-            volume_factor = 1.0
-            confidence = min(speech_prob, 1.0)  # Use actual probability as confidence
-        else:
-            # No speech detected
-            speech_detected = False
-            volume_factor = 0.1  # 10% volume for non-speech
-            confidence = speech_prob
+#         if speech_prob > speech_threshold:
+#             # Speech detected
+#             speech_detected = True
+#             volume_factor = 1.0
+#             confidence = min(speech_prob, 1.0)  # Use actual probability as confidence
+#         else:
+#             # No speech detected
+#             speech_detected = False
+#             volume_factor = 0.1  # 10% volume for non-speech
+#             confidence = speech_prob
         
-        # Apply volume scaling to the current chunk
-        processed_audio = (audio_np * volume_factor).astype(np.int16)
+#         # Apply volume scaling to the current chunk
+#         processed_audio = (audio_np * volume_factor).astype(np.int16)
         
-    except Exception as e:
-        print(f"Silero VAD error: {e}")
-        # Fallback: pass through original audio
-        processed_audio = audio_np
-        speech_detected = True
-        confidence = 1.0
+#     except Exception as e:
+#         print(f"Silero VAD error: {e}")
+#         # Fallback: pass through original audio
+#         processed_audio = audio_np
+#         speech_detected = True
+#         confidence = 1.0
     
-    # Update LED based on speech detection and confidence
-    led_controller.set_vad_active(speech_detected, confidence)
+#     # Update LED based on speech detection and confidence
+#     led_controller.set_vad_active(speech_detected, confidence)
     
-    return processed_audio
+#     return processed_audio
 
 
 def apply_echo_cancellation(mic_data, reference_buffer):
@@ -420,13 +420,14 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
                 )
 
                 # Then apply VAD-based silencing (pass numpy array directly)
-                final_audio = await apply_vad_silencing(enhanced_audio)
-                processed_data = final_audio.tobytes()
+                # final_audio = await apply_vad_silencing(enhanced_audio)
+                processed_data = enhanced_audio.tobytes()
             else:
                 # Single channel: convert once and apply VAD-based silencing
-                audio_np = np.frombuffer(processed_data, dtype=np.int16)
-                final_audio = await apply_vad_silencing(audio_np)
-                processed_data = final_audio.tobytes()
+                # audio_np = np.frombuffer(processed_data, dtype=np.int16)
+                # final_audio = await apply_vad_silencing(audio_np)
+                # processed_data = final_audio.tobytes()
+                pass
 
             # Record processed audio for debug
             debug_recorder.record_processed(processed_data)
