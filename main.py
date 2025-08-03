@@ -134,6 +134,7 @@ load_dotenv()
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Alex Assistant')
 parser.add_argument('--debug', action='store_true', help='Enable debug audio recording')
+parser.add_argument('--enable-vad-silencing', action='store_true', help='Enable VAD-based audio silencing')
 args = parser.parse_args()
 
 audio = pyaudio.PyAudio()
@@ -275,7 +276,7 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
 
 
 async def apply_vad_silencing(audio_np):
-    """Apply Silero VAD-based silencing using VADIterator.
+    """Apply Silero VAD-based LED feedback and optional audio silencing.
     
     Args:
         audio_np: numpy array of int16 audio data
@@ -293,7 +294,7 @@ async def apply_vad_silencing(audio_np):
     audio_float = audio_np.astype(np.float32) / 32768.0
     
     try:
-        # Run VAD in a separate thread to avoid blocking
+        # Always run VAD for LED feedback
         speech_prob = await asyncio.to_thread(run_vad_inference, audio_float)
         
         # Threshold for speech detection
@@ -302,13 +303,23 @@ async def apply_vad_silencing(audio_np):
         if speech_prob > speech_threshold:
             # Speech detected
             speech_detected = True
-            volume_factor = 1.0
             confidence = min(speech_prob, 1.0)  # Use actual probability as confidence
+            
+            # Only apply volume scaling if VAD silencing is enabled
+            if args.enable_vad_silencing:
+                volume_factor = 1.0
+            else:
+                volume_factor = 1.0  # No silencing, keep original volume
         else:
             # No speech detected
             speech_detected = False
-            volume_factor = 0.1  # 10% volume for non-speech
             confidence = speech_prob
+            
+            # Only apply volume scaling if VAD silencing is enabled
+            if args.enable_vad_silencing:
+                volume_factor = 0.1  # 10% volume for non-speech
+            else:
+                volume_factor = 1.0  # No silencing, keep original volume
         
         # Apply volume scaling to the current chunk
         processed_audio = (audio_np * volume_factor).astype(np.int16)
@@ -320,7 +331,7 @@ async def apply_vad_silencing(audio_np):
         speech_detected = True
         confidence = 1.0
     
-    # Update LED based on speech detection and confidence
+    # Always update LED based on speech detection and confidence
     led_controller.set_vad_active(speech_detected, confidence)
     
     return processed_audio
