@@ -182,6 +182,10 @@ except Exception as e:
     vad_model = None
     vad_iterator = None
 
+async def heartbeat():
+    while True:
+        print("tick")
+        await asyncio.sleep(1)
 
 
 def apply_dual_channel_noise_suppression(left_channel, right_channel):
@@ -616,6 +620,7 @@ async def run_conversation(
 async def main(event_loop: asyncio.AbstractEventLoop):
     librespot_process = None
     tasks = []
+    tasks.append(event_loop.create_task(heartbeat()))
 
     try:
         print("Starting librespot...")
