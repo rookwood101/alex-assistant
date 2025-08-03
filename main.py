@@ -151,7 +151,7 @@ debug_recorder = DebugAudioRecorder(enabled=args.debug)
 porcupine = pvporcupine.create(
     access_key=os.environ["PICOVOICE_ACCESS_KEY"],
     keywords=["porcupine"],
-    sensitivities=[0.4],  # TODO: tune
+    sensitivities=[0.3],  # TODO: tune
 )
 
 # Audio processing configuration
@@ -178,7 +178,6 @@ def run_vad_inference(audio_float):
         # No complete speech segment in this chunk
         # Get raw model confidence for partial segments
         raw_confidence = vad_model(audio_tensor, 16000).item()
-        print(f"No complete segment, raw confidence: {raw_confidence:.3f}")
         return raw_confidence
 
 
@@ -189,7 +188,7 @@ try:
                                           force_reload=False,
                                           onnx=False)
     get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks = vad_utils
-    vad_iterator = VADIterator(vad_model, threshold=0.4, sampling_rate=16000, 
+    vad_iterator = VADIterator(vad_model, threshold=0.1, sampling_rate=16000, 
                                min_silence_duration_ms=100, speech_pad_ms=200)
 except Exception as e:
     print(f"Warning: Failed to initialize Silero VAD: {e}")
@@ -297,11 +296,8 @@ async def apply_vad_silencing(audio_np):
         # Run VAD in a separate thread to avoid blocking
         speech_prob = await asyncio.to_thread(run_vad_inference, audio_float)
         
-        # Print confidence for threshold tuning
-        print(f"VAD confidence: {speech_prob:.3f}")
-        
         # Threshold for speech detection
-        speech_threshold = 0.5
+        speech_threshold = 0.1
         
         if speech_prob > speech_threshold:
             # Speech detected
