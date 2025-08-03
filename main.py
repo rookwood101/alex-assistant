@@ -27,7 +27,6 @@ from halo import Halo
 
 from asyncio import Queue, Event
 from tools import get_tools
-
 import torch
 
 # LED support for Raspberry Pi
@@ -135,6 +134,7 @@ load_dotenv()
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Alex Assistant')
 parser.add_argument('--debug', action='store_true', help='Enable debug audio recording')
+parser.add_argument('--enable-vad-silencing', action='store_true', help='Enable VAD-based audio silencing')
 args = parser.parse_args()
 
 audio = pyaudio.PyAudio()
@@ -152,7 +152,7 @@ debug_recorder = DebugAudioRecorder(enabled=args.debug)
 porcupine = pvporcupine.create(
     access_key=os.environ["PICOVOICE_ACCESS_KEY"],
     keywords=["porcupine"],
-    sensitivities=[0.4],  # TODO: tune
+    sensitivities=[0.3],  # TODO: tune
 )
 
 # Audio processing configuration
@@ -164,9 +164,23 @@ ENABLE_AEC = IS_LINUX  # Enable acoustic echo cancellation on Linux/RPi
 echo_buffer_size = 2048  # Buffer size for echo reference data
 
 def run_vad_inference(audio_float):
-    """Run VAD inference on audio data."""
+    """Run VAD inference on audio data using VADIterator properly."""
     audio_tensor = torch.from_numpy(audio_float)
-    return vad_model(audio_tensor, 16000).item()
+    
+    # VADIterator maintains state between calls and returns speech segments
+    # when they are detected (handles thresholding internally at 0.4)
+    speech_dict = vad_iterator(audio_tensor, return_seconds=True)
+    
+    if speech_dict:
+        # Speech segment detected - return high confidence
+        print(f"Speech segment detected: {speech_dict}")
+        return 0.8  # High confidence when VADIterator detects speech
+    else:
+        # No complete speech segment in this chunk
+        # Get raw model confidence for partial segments
+        raw_confidence = vad_model(audio_tensor, 16000).item()
+        return raw_confidence
+
 
 # Silero VAD model and utils
 try:
@@ -175,14 +189,18 @@ try:
                                           force_reload=False,
                                           onnx=False)
     get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks = vad_utils
-    vad_iterator = VADIterator(vad_model, threshold=0.5, sampling_rate=16000, 
+    vad_iterator = VADIterator(vad_model, threshold=0.1, sampling_rate=16000, 
                                min_silence_duration_ms=100, speech_pad_ms=200)
 except Exception as e:
     print(f"Warning: Failed to initialize Silero VAD: {e}")
     vad_model = None
     vad_iterator = None
 
-
+def reset_vad_iterator():
+    """Reset VAD iterator state (call at start of new conversation)"""
+    global vad_iterator
+    if vad_iterator is not None:
+        vad_iterator.reset_states()  # Use built-in reset method
 
 def apply_dual_channel_noise_suppression(left_channel, right_channel):
     """Apply advanced noise suppression using both microphone channels."""
@@ -258,7 +276,7 @@ def apply_dual_channel_noise_suppression(left_channel, right_channel):
 
 
 async def apply_vad_silencing(audio_np):
-    """Apply Silero VAD-based silencing using VADIterator.
+    """Apply Silero VAD-based LED feedback and optional audio silencing.
     
     Args:
         audio_np: numpy array of int16 audio data
@@ -276,25 +294,32 @@ async def apply_vad_silencing(audio_np):
     audio_float = audio_np.astype(np.float32) / 32768.0
     
     try:
-        # Run VAD in a separate thread to avoid blocking
+        # Always run VAD for LED feedback
         speech_prob = await asyncio.to_thread(run_vad_inference, audio_float)
         
-        # Print confidence for threshold tuning
-        print(f"VAD confidence: {speech_prob:.3f}")
-        
         # Threshold for speech detection
-        speech_threshold = 0.5
+        speech_threshold = 0.1
         
         if speech_prob > speech_threshold:
             # Speech detected
             speech_detected = True
-            volume_factor = 1.0
             confidence = min(speech_prob, 1.0)  # Use actual probability as confidence
+            
+            # Only apply volume scaling if VAD silencing is enabled
+            if args.enable_vad_silencing:
+                volume_factor = 1.0
+            else:
+                volume_factor = 1.0  # No silencing, keep original volume
         else:
             # No speech detected
             speech_detected = False
-            volume_factor = 0.1  # 10% volume for non-speech
             confidence = speech_prob
+            
+            # Only apply volume scaling if VAD silencing is enabled
+            if args.enable_vad_silencing:
+                volume_factor = 0.1  # 10% volume for non-speech
+            else:
+                volume_factor = 1.0  # No silencing, keep original volume
         
         # Apply volume scaling to the current chunk
         processed_audio = (audio_np * volume_factor).astype(np.int16)
@@ -306,7 +331,7 @@ async def apply_vad_silencing(audio_np):
         speech_detected = True
         confidence = 1.0
     
-    # Update LED based on speech detection and confidence
+    # Always update LED based on speech detection and confidence
     led_controller.set_vad_active(speech_detected, confidence)
     
     return processed_audio
@@ -388,7 +413,7 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
         )
 
         while True:
-            audio_data = await asyncio.to_thread(stream.read, CHUNK_SIZE)
+            audio_data = await asyncio.to_thread(stream.read, CHUNK_SIZE, exception_on_overflow=False)
 
             # Record unprocessed audio for debug
             debug_recorder.record_unprocessed(audio_data)
@@ -489,7 +514,7 @@ async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer:
                 if len(echo_reference_buffer) > echo_buffer_size:
                     echo_reference_buffer.pop(0)
 
-            await asyncio.to_thread(stream.write, audio_data)
+            await asyncio.to_thread(stream.write, audio_data, exception_on_underflow=False)
     finally:
         stream.stop_stream()
         stream.close()
@@ -544,6 +569,9 @@ async def run_conversation(
     initial_text: str | None = None,
 ):
     """Shared conversation loop for both wake-word and timer events."""
+    # Reset VAD iterator state for new conversation
+    reset_vad_iterator()
+    
     if initial_text:
         await session.send_realtime_input(text=initial_text)
 
