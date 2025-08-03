@@ -389,14 +389,10 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
             rate=SAMPLE_RATE,
             input=True,
             frames_per_buffer=CHUNK_SIZE,
+            exception_on_overflow=False,
         )
 
         while True:
-            if not stream.get_read_available():
-                await asyncio.sleep(0.01)
-                continue
-            print("reading audio")
-
             audio_data = await asyncio.to_thread(stream.read, CHUNK_SIZE)
 
             # Record unprocessed audio for debug
