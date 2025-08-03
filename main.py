@@ -163,12 +163,23 @@ ENABLE_AEC = IS_LINUX  # Enable acoustic echo cancellation on Linux/RPi
 echo_buffer_size = 2048  # Buffer size for echo reference data
 
 def run_vad_inference(audio_float):
-    """Run VAD inference on audio data."""
+    """Run VAD inference on audio data using VADIterator properly."""
     audio_tensor = torch.from_numpy(audio_float)
-    # return vad_model(audio_tensor, 16000).item()
-    speech_dict = vad_iterator(audio_tensor, return_seconds=False)
-    print(speech_dict)
-    return 1 if speech_dict else 0
+    
+    # VADIterator maintains state between calls and returns speech segments
+    # when they are detected (handles thresholding internally at 0.4)
+    speech_dict = vad_iterator(audio_tensor, return_seconds=True)
+    
+    if speech_dict:
+        # Speech segment detected - return high confidence
+        print(f"Speech segment detected: {speech_dict}")
+        return 0.8  # High confidence when VADIterator detects speech
+    else:
+        # No complete speech segment in this chunk
+        # Get raw model confidence for partial segments
+        raw_confidence = vad_model(audio_tensor, 16000).item()
+        print(f"No complete segment, raw confidence: {raw_confidence:.3f}")
+        return raw_confidence
 
 
 # Silero VAD model and utils
@@ -184,6 +195,12 @@ except Exception as e:
     print(f"Warning: Failed to initialize Silero VAD: {e}")
     vad_model = None
     vad_iterator = None
+
+def reset_vad_iterator():
+    """Reset VAD iterator state (call at start of new conversation)"""
+    global vad_iterator
+    if vad_iterator is not None:
+        vad_iterator.reset_states()  # Use built-in reset method
 
 def apply_dual_channel_noise_suppression(left_channel, right_channel):
     """Apply advanced noise suppression using both microphone channels."""
@@ -545,6 +562,9 @@ async def run_conversation(
     initial_text: str | None = None,
 ):
     """Shared conversation loop for both wake-word and timer events."""
+    # Reset VAD iterator state for new conversation
+    reset_vad_iterator()
+    
     if initial_text:
         await session.send_realtime_input(text=initial_text)
 
