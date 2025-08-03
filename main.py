@@ -27,7 +27,6 @@ from halo import Halo
 
 from asyncio import Queue, Event
 from tools import get_tools
-breakpoint()
 import torch
 
 # LED support for Raspberry Pi
