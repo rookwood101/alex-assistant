@@ -165,7 +165,11 @@ echo_buffer_size = 2048  # Buffer size for echo reference data
 def run_vad_inference(audio_float):
     """Run VAD inference on audio data."""
     audio_tensor = torch.from_numpy(audio_float)
-    return vad_model(audio_tensor, 16000).item()
+    # return vad_model(audio_tensor, 16000).item()
+    speech_dict = vad_iterator(audio_tensor, return_seconds=False)
+    print(speech_dict)
+    return 1 if speech_dict else 0
+
 
 # Silero VAD model and utils
 try:
@@ -174,7 +178,7 @@ try:
                                           force_reload=False,
                                           onnx=False)
     get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks = vad_utils
-    vad_iterator = VADIterator(vad_model, threshold=0.5, sampling_rate=16000, 
+    vad_iterator = VADIterator(vad_model, threshold=0.4, sampling_rate=16000, 
                                min_silence_duration_ms=100, speech_pad_ms=200)
 except Exception as e:
     print(f"Warning: Failed to initialize Silero VAD: {e}")
