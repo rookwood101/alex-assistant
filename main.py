@@ -465,21 +465,26 @@ async def detect_wakeword(
     CHUNK_SIZE = porcupine.frame_length
     STRUCT_FORMAT = "h" * CHUNK_SIZE
 
-    spinner = Halo(text="Listening for wake word (porcupine)...", spinner="dots")
+    # Only use spinner if we have a proper terminal
+    use_spinner = sys.stdout.isatty() and sys.stderr.isatty()
+    spinner = Halo(text="Listening for wake word (porcupine)...", spinner="dots") if use_spinner else None
 
-    if conversation_inactive.is_set():
+    if conversation_inactive.is_set() and spinner:
         spinner.start()
     while True:
         if not conversation_inactive.is_set():
-            spinner.stop()
+            if spinner:
+                spinner.stop()
             await conversation_inactive.wait()
-            spinner.start()
+            if spinner:
+                spinner.start()
         audio_data = await audio_input_queue.get()
         audio_data = struct.unpack_from(STRUCT_FORMAT, audio_data)
 
         keyword_index = porcupine.process(audio_data)
         if keyword_index >= 0:
-            spinner.stop()
+            if spinner:
+                spinner.stop()
             return True
 
 
