@@ -395,6 +395,7 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
             if not stream.get_read_available():
                 await asyncio.sleep(0.01)
                 continue
+            print("reading audio")
 
             audio_data = await asyncio.to_thread(stream.read, CHUNK_SIZE)
 
