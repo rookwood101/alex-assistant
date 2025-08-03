@@ -1,6 +1,7 @@
 import asyncio
 import os
 import platform
+import sys
 import time
 import pyaudio
 import subprocess
