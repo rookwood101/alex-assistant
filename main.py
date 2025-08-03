@@ -389,6 +389,7 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
             rate=SAMPLE_RATE,
             input=True,
             frames_per_buffer=CHUNK_SIZE,
+            exception_on_overflow=False,
         )
 
         while True:
