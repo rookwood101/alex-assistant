@@ -6,3 +6,4 @@ alwaysApply: true
 * Remember that the project is primarily aimed at running on a raspberry pi under raspberry pi OS
 * Run the tests when you make changes
 * Always use todo lists to keep track of what you need to do
+* Use `ssh pi@raspberrypi.local` to connect and run commands on the raspberry pi
