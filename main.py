@@ -28,7 +28,10 @@ from halo import Halo
 
 from asyncio import Queue, Event
 from tools import get_tools
-import torch
+try:
+    import torch
+except Exception:
+    torch = None
 
 # LED support for Raspberry Pi
 try:
@@ -136,7 +139,8 @@ load_dotenv()
 parser = argparse.ArgumentParser(description='Alex Assistant')
 parser.add_argument('--debug', action='store_true', help='Enable debug audio recording')
 parser.add_argument('--enable-vad-silencing', action='store_true', help='Enable VAD-based audio silencing')
-args = parser.parse_args()
+# Parse known args to avoid pytest/unknown args failures on import
+args = parser.parse_known_args()[0]
 
 audio = pyaudio.PyAudio()
 model = "gemini-live-2.5-flash-preview"
@@ -149,12 +153,28 @@ led_controller = LEDController(max_brightness=10)
 # Initialize debug audio recorder
 debug_recorder = DebugAudioRecorder(enabled=args.debug)
 
-# Initialize Porcupine with the "porcupine" keyword
-porcupine = pvporcupine.create(
-    access_key=os.environ["PICOVOICE_ACCESS_KEY"],
-    keywords=["porcupine"],
-    sensitivities=[0.3],  # TODO: tune
-)
+class _FallbackPorcupine:
+    def __init__(self):
+        self.sample_rate = 16000
+        self.frame_length = 512
+
+    def process(self, pcm):
+        # Always no keyword detected in fallback
+        return -1
+
+def _create_porcupine():
+    try:
+        access_key = os.environ["PICOVOICE_ACCESS_KEY"]
+        return pvporcupine.create(
+            access_key=access_key,
+            keywords=["porcupine"],
+            sensitivities=[0.3],
+        )
+    except Exception as e:
+        print(f"Warning: Porcupine unavailable ({e}); using fallback stub.")
+        return _FallbackPorcupine()
+
+porcupine = _create_porcupine()
 
 # Audio processing configuration
 IS_LINUX = platform.system() == "Linux"
@@ -184,16 +204,20 @@ def run_vad_inference(audio_float):
 
 
 # Silero VAD model and utils
-try:
-    vad_model, vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                                          model='silero_vad',
-                                          force_reload=False,
-                                          onnx=False)
-    get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks = vad_utils
-    vad_iterator = VADIterator(vad_model, threshold=0.1, sampling_rate=16000, 
-                               min_silence_duration_ms=100, speech_pad_ms=200)
-except Exception as e:
-    print(f"Warning: Failed to initialize Silero VAD: {e}")
+if torch is not None:
+    try:
+        vad_model, vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                              model='silero_vad',
+                                              force_reload=False,
+                                              onnx=False)
+        get_speech_timestamps, save_audio, read_audio, VADIterator, collect_chunks = vad_utils
+        vad_iterator = VADIterator(vad_model, threshold=0.1, sampling_rate=16000, 
+                                   min_silence_duration_ms=100, speech_pad_ms=200)
+    except Exception as e:
+        print(f"Warning: Failed to initialize Silero VAD: {e}")
+        vad_model = None
+        vad_iterator = None
+else:
     vad_model = None
     vad_iterator = None
 
