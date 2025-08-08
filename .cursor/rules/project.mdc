@@ -1,0 +1,6 @@
+---
+alwaysApply: true
+---
+
+* Use `uv` to manage packages
+* Remember that the project is primarily aimed at running on a raspberry pi under raspberry pi OS
