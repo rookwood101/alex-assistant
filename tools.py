@@ -13,6 +13,10 @@ import time
 import vlc
 from asyncio import Queue
 
+# Lightweight toolset when running in test mode or when Spotify tooling is disabled
+_ALEX_TEST_MODE = os.getenv("ALEX_TEST_MODE", "0") == "1"
+_ALEX_DISABLE_SPOTIFY = os.getenv("ALEX_DISABLE_SPOTIFY", "0") == "1"
+
 @dataclass
 class NowPlayingInfo:
     state: Literal["playing", "paused", "stopped"]
@@ -28,6 +32,57 @@ class NowPlayingInfo:
 
 
 def get_tools(event_loop: asyncio.AbstractEventLoop, event_queue: Queue) -> list[Callable]:
+    # In test mode or when Spotify is disabled, avoid initializing Spotify/VLC
+    if _ALEX_TEST_MODE or _ALEX_DISABLE_SPOTIFY:
+        timers: Dict[str, float] = {}
+
+        def _generate_unique_display_name(base_name: str) -> str:
+            if base_name.strip() == "":
+                base_name = "timer"
+            if base_name not in timers:
+                return base_name
+            suffix = 2
+            while f"{base_name} {suffix}" in timers:
+                suffix += 1
+            return f"{base_name} {suffix}"
+
+        def async_tool(func: Callable[..., Awaitable]):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                event_loop.create_task(func(*args, **kwargs))
+                return None
+            return wrapper
+
+        @async_tool
+        async def set_timer(name: str, hours: int, minutes: int, seconds: int, context: str = ""):
+            duration_seconds = hours * 3600 + minutes * 60 + seconds
+            display_name = _generate_unique_display_name(name)
+            timers[display_name] = time.time() + duration_seconds
+            await asyncio.sleep(duration_seconds)
+            message = f"<system>Tell the user that their {hours} hour {minutes} minute {seconds} second {display_name} timer finished! and {context}</system>"
+            timers.pop(display_name, None)
+            await event_queue.put(message)
+
+        def get_current_temperature(city: str, country: str = "United Kingdom") -> dict:
+            temp = randint(10, 20)
+            return {"status": "success", "message": f"Current temperature in {city}, {country} is {temp}°C.", "celsius": temp, "city": city, "country": country}
+
+        def get_timer_status() -> dict:
+            now_ts = time.time()
+            expired_keys = [k for k, end in timers.items() if end <= now_ts]
+            for k in expired_keys:
+                timers.pop(k, None)
+            if not timers:
+                return {"status": "success", "message": "No timers currently set."}
+            status_lines: list[str] = []
+            for tname, end in timers.items():
+                remaining = int(end - now_ts)
+                hrs, rem = divmod(remaining, 3600)
+                mins, secs = divmod(rem, 60)
+                status_lines.append(f'"{tname}": {hrs}h {mins}m {secs}s remaining')
+            return {"status": "success", "message": "Active timers: " + "; ".join(status_lines)}
+
+        return [set_timer, get_current_temperature, get_timer_status]
     
     # Initialize Spotify client
     sp = spotipy.Spotify(auth_manager=SpotifyOAuth(

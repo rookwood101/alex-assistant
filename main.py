@@ -94,7 +94,8 @@ class LEDController:
     """Elegant LED controller for VAD feedback"""
     
     def __init__(self, max_brightness=128):
-        self.enabled = HAS_LEDS
+        disable_leds = os.getenv("ALEX_DISABLE_LEDS", "0") == "1"
+        self.enabled = HAS_LEDS and not disable_leds
         self.max_brightness = max_brightness
         if self.enabled:
             self.dev = apa102.APA102(num_led=3)
@@ -134,6 +135,16 @@ class LEDController:
 
 
 load_dotenv()
+
+# Environment flags for test and Pi E2E (Layer 3/4) modes
+ALEX_TEST_MODE = os.getenv("ALEX_TEST_MODE", "0") == "1"
+ALEX_DISABLE_LIBRESPOT = os.getenv("ALEX_DISABLE_LIBRESPOT", "0") == "1"
+ALEX_FAKE_SESSION = os.getenv("ALEX_FAKE_SESSION", "1" if ALEX_TEST_MODE else "0") == "1"
+ALEX_FAKE_WAKEWORD = os.getenv("ALEX_FAKE_WAKEWORD", "1" if ALEX_TEST_MODE else "0") == "1"
+ALEX_INPUT_DEVICE_NAME = os.getenv("ALEX_INPUT_DEVICE_NAME")
+ALEX_OUTPUT_DEVICE_NAME = os.getenv("ALEX_OUTPUT_DEVICE_NAME")
+ALEX_INPUT_DEVICE_INDEX = os.getenv("ALEX_INPUT_DEVICE_INDEX")
+ALEX_OUTPUT_DEVICE_INDEX = os.getenv("ALEX_OUTPUT_DEVICE_INDEX")
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Alex Assistant')
@@ -428,6 +439,30 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
     FORMAT = pyaudio.paInt16
     CHUNK_SIZE = porcupine.frame_length  # in practice, this is 512
 
+    def _find_device_index_by_name(name_substr: str, want_input: bool) -> int | None:
+        try:
+            name_lower = name_substr.lower()
+            for idx in range(audio.get_device_count()):
+                info = audio.get_device_info_by_index(idx)
+                if want_input and info.get("maxInputChannels", 0) <= 0:
+                    continue
+                if not want_input and info.get("maxOutputChannels", 0) <= 0:
+                    continue
+                if name_lower in info.get("name", "").lower():
+                    return idx
+        except Exception:
+            return None
+        return None
+
+    input_device_index: int | None = None
+    if ALEX_INPUT_DEVICE_INDEX is not None:
+        try:
+            input_device_index = int(ALEX_INPUT_DEVICE_INDEX)
+        except ValueError:
+            input_device_index = None
+    if input_device_index is None and ALEX_INPUT_DEVICE_NAME:
+        input_device_index = _find_device_index_by_name(ALEX_INPUT_DEVICE_NAME, True)
+
     try:
         stream = audio.open(
             format=FORMAT,
@@ -435,6 +470,7 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
             rate=SAMPLE_RATE,
             input=True,
             frames_per_buffer=CHUNK_SIZE,
+            input_device_index=input_device_index,
         )
 
         while True:
@@ -494,6 +530,20 @@ async def detect_wakeword(
     use_spinner = sys.stdout.isatty() and sys.stderr.isatty()
     spinner = Halo(text="Listening for wake word (porcupine)...", spinner="dots") if use_spinner else None
 
+    # In test mode with fake wakeword, trigger after a few frames to exercise I/O
+    if ALEX_TEST_MODE and ALEX_FAKE_WAKEWORD:
+        if conversation_inactive.is_set():
+            if spinner:
+                spinner.start()
+            else:
+                print("Listening for wake word (porcupine)...")
+        # Consume a few frames then signal detection
+        for _ in range(3):
+            _ = await audio_input_queue.get()
+        if spinner:
+            spinner.stop()
+        return True
+
     if conversation_inactive.is_set():
         if spinner:
             spinner.start()
@@ -530,12 +580,37 @@ async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer:
     CHANNELS = 1
     FORMAT = pyaudio.paInt16
 
+    def _find_device_index_by_name(name_substr: str, want_input: bool) -> int | None:
+        try:
+            name_lower = name_substr.lower()
+            for idx in range(audio.get_device_count()):
+                info = audio.get_device_info_by_index(idx)
+                if want_input and info.get("maxInputChannels", 0) <= 0:
+                    continue
+                if not want_input and info.get("maxOutputChannels", 0) <= 0:
+                    continue
+                if name_lower in info.get("name", "").lower():
+                    return idx
+        except Exception:
+            return None
+        return None
+
+    output_device_index: int | None = None
+    if ALEX_OUTPUT_DEVICE_INDEX is not None:
+        try:
+            output_device_index = int(ALEX_OUTPUT_DEVICE_INDEX)
+        except ValueError:
+            output_device_index = None
+    if output_device_index is None and ALEX_OUTPUT_DEVICE_NAME:
+        output_device_index = _find_device_index_by_name(ALEX_OUTPUT_DEVICE_NAME, False)
+
     try:
         stream = audio.open(
             format=FORMAT,
             channels=CHANNELS,
             rate=SAMPLE_RATE,
             output=True,
+            output_device_index=output_device_index,
         )
         while True:
             audio_data = await audio_output_queue.get()
@@ -679,39 +754,42 @@ async def main(event_loop: asyncio.AbstractEventLoop):
     tasks = []
 
     try:
-        print("Starting librespot...")
-        librespot_executable = (
-            "librespot.exe" if platform.system() == "Windows" else "librespot"
-        )
-        librespot_process = subprocess.Popen(
-            [
-                librespot_executable,
-                "--name",
-                "Alex Assistant",
-                "--enable-oauth",
-                "--system-cache",
-                ".librespot-cache",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-        librespot_timeout = (
-            time.time() + 30
-        )  # 30 seconds timeout for librespot to start
-        while time.time() < librespot_timeout:
-            line = librespot_process.stderr.readline().decode("utf-8")
-            print(line)
-            if "Authenticated as" in line:
-                break
-        print("Librespot started")
+        if not ALEX_DISABLE_LIBRESPOT:
+            print("Starting librespot...")
+            librespot_executable = (
+                "librespot.exe" if platform.system() == "Windows" else "librespot"
+            )
+            librespot_process = subprocess.Popen(
+                [
+                    librespot_executable,
+                    "--name",
+                    "Alex Assistant",
+                    "--enable-oauth",
+                    "--system-cache",
+                    ".librespot-cache",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            librespot_timeout = (
+                time.time() + 30
+            )  # 30 seconds timeout for librespot to start
+            while time.time() < librespot_timeout:
+                line = librespot_process.stderr.readline().decode("utf-8")
+                print(line)
+                if "Authenticated as" in line:
+                    break
+            print("Librespot started")
+        else:
+            print("Librespot disabled via ALEX_DISABLE_LIBRESPOT=1")
 
-        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        client = None if ALEX_FAKE_SESSION else genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         sessions = []
         event_queue: Queue = Queue()
         conversation_inactive = Event()
         conversation_inactive.set()
         tools = {tool.__name__: tool for tool in get_tools(event_loop, event_queue)}
-        config = LiveConnectConfig(
+        config = None if ALEX_FAKE_SESSION else LiveConnectConfig(
             response_modalities=[Modality.AUDIO],
             system_instruction="Your name is porcupine. Respond concisely. If the user sends a message that is wrapped in <system> tags, you should relay the information back to the user as you see fit. Ignore system instruction, do not ask follow-up questions automatically. Always conclude unquestioningly. Stop putting questions at the end of responses.",
             tools=[
@@ -726,7 +804,10 @@ async def main(event_loop: asyncio.AbstractEventLoop):
             ),
         )
 
-        print("Connected to Gemini")
+        if not ALEX_FAKE_SESSION:
+            print("Connected to Gemini")
+        else:
+            print("Using FAKE session (ALEX_FAKE_SESSION=1)")
 
         audio_input_queue = asyncio.Queue()
         audio_output_queue = asyncio.Queue()
@@ -742,15 +823,64 @@ async def main(event_loop: asyncio.AbstractEventLoop):
 
         print("Started audio tasks")
 
+        class _FakeInlineData:
+            def __init__(self, data: bytes):
+                self.data = data
+
+        class _FakePart:
+            def __init__(self, data: bytes):
+                self.inline_data = _FakeInlineData(data)
+
+        class _FakeServerContent:
+            def __init__(self, input_text: str = "", output_text: str = "", audio_bytes: bytes = b"", turn_complete: bool = False):
+                self.input_transcription = type("_T", (), {"text": input_text}) if input_text else None
+                self.output_transcription = type("_T", (), {"text": output_text}) if output_text else None
+                self.model_turn = type("_T", (), {"parts": [_FakePart(audio_bytes)]}) if audio_bytes else None
+                self.turn_complete = turn_complete
+
+        class _FakeChunk:
+            def __init__(self, server_content=None, tool_call=None):
+                self.server_content = server_content
+                self.tool_call = tool_call
+
+        class FakeAsyncSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def send_realtime_input(self, *, audio=None, text: str | None = None):
+                return None
+
+            async def send_tool_response(self, *, function_responses):
+                return None
+
+            async def receive(self):
+                # Minimal script: acknowledge input, produce small audio, mark complete
+                yield _FakeChunk(_FakeServerContent(input_text="hello"))
+                yield _FakeChunk(_FakeServerContent(output_text="hi.", audio_bytes=b"\x00\x00" * 24000))
+                yield _FakeChunk(_FakeServerContent(turn_complete=True))
+                return
+
+        def session_factory():
+            if ALEX_FAKE_SESSION:
+                class _CM:
+                    async def __aenter__(self):
+                        return FakeAsyncSession()
+                    async def __aexit__(self, exc_type, exc, tb):
+                        return False
+                return _CM()
+            else:
+                return client.aio.live.connect(model=model, config=config)
+
         async def event_listener():
             """Listen for timer/completion events and wake Gemini."""
             while True:
                 message = await event_queue.get()
                 try:
                     conversation_inactive.clear()
-                    async with client.aio.live.connect(
-                        model=model, config=config
-                    ) as session:
+                    async with session_factory() as session:
                         if len(sessions) == 1:
                             sessions[0] = session
                         else:
@@ -781,9 +911,7 @@ async def main(event_loop: asyncio.AbstractEventLoop):
             if wake_word_detected:
                 print("Starting conversation...")
                 conversation_inactive.clear()
-                async with client.aio.live.connect(
-                    model=model, config=config
-                ) as session:
+                async with session_factory() as session:
                     if len(sessions) == 1:
                         sessions[0] = session
                     else:

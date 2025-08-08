@@ -6,4 +6,8 @@ alwaysApply: true
 * Remember that the project is primarily aimed at running on a raspberry pi under raspberry pi OS
 * Run the tests when you make changes
 * Always use todo lists to keep track of what you need to do
-* Use `ssh pi@raspberrypi.local` to connect and run commands on the raspberry pi
+* Use `ssh pi@raspberrypi.local` to connect and run commands on the raspberry pi. On the pi:
+    - `uv` is setup
+    - to get files onto the pi, you can commit & push your changes and then pull them on the raspberry pi (make sure you're both on the same branch!)
+    - do not mess with origin's git history! (non destructive operations only to the git remote)
+    - alex-assistant (this repo) is already git cloned into /home/pi/alex-assistant

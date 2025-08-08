@@ -62,18 +62,19 @@ Use a test mode to avoid real hardware/cloud while exercising the full event loo
 ### Layer 4 — End-to-end on Raspberry Pi (ALSA loopback)
 Run near-real with PyAudio and ALSA loopback as the microphone.
 
-- [ ] Enable ALSA loopback
-  - [ ] `sudo modprobe snd-aloop`
-- [ ] Identify devices
-  - [ ] `arecord -l`
-  - [ ] `aplay -l`
-- [ ] Configure app to capture from loopback device; keep normal speaker output
-- [ ] Prepare 16kHz PCM/WAV fixtures including ambient noise, wakeword, and short utterances
-- [ ] Feed audio into loopback input
-  - [ ] `aplay -D plughw:Loopback,0 test_sequence.wav`
-- [ ] Run app with test mode (mock LLM if desired)
-- [ ] Execute two cycles with a gap; verify the second request succeeds
-- [ ] Use `--debug` to save and compare `debug_unprocessed.wav` and `debug_processed.wav`
+- [x] Enable ALSA loopback
+  - [x] `sudo modprobe snd-aloop`
+- [x] Identify devices
+  - [x] `arecord -l`
+  - [x] `aplay -l`
+- [x] Configure app to capture from loopback device; keep normal speaker output
+- [x] Prepare 16kHz WAV fixtures:
+  - [x] `tests/layer4/wakeword.wav`, `tests/layer4/whats_the_capital_of_england.wav`, `tests/layer4/tell_me_my_local_weather.wav`
+- [x] Feed audio into loopback input
+  - [x] `aplay -D plughw:Loopback,0 <file>.wav`
+- [x] Run app with test mode or real mode via env flags
+- [x] Execute two cycles with a gap; verify the second request succeeds
+- [x] Use `--debug` to save and compare `debug_unprocessed.wav` and `debug_processed.wav`
 
 ### Soak and robustness tests
 - [ ] Repeat two-conversation cycle 50–100 times on Pi overnight
@@ -119,7 +120,7 @@ uv run pytest -q -k integration --asyncio-mode=auto
 sudo modprobe snd-aloop
 arecord -l | cat
 aplay -l | cat
-aplay -D plughw:Loopback,0 test_sequence.wav
+aplay -D plughw:Loopback,0 tests/layer4/wakeword.wav
 ```
 
 
