@@ -163,6 +163,27 @@ led_controller = LEDController(max_brightness=10)
 
 # Initialize debug audio recorder
 debug_recorder = DebugAudioRecorder(enabled=args.debug)
+# Ensure debug audio is saved on termination (e.g., when tests terminate the app)
+import signal
+
+def _handle_termination(signum, _frame):
+    try:
+        debug_recorder.save_recordings()
+    except Exception:
+        pass
+    try:
+        led_controller.off()
+    except Exception:
+        pass
+    raise SystemExit(0)
+
+try:
+    signal.signal(signal.SIGTERM, _handle_termination)
+    signal.signal(signal.SIGINT, _handle_termination)
+except Exception:
+    # Signal handling may not be available on some platforms
+    pass
+
 
 class _FallbackPorcupine:
     def __init__(self):
