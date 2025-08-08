@@ -14,7 +14,10 @@ uv run pytest -q
 ```bash
 ssh pi@raspberrypi.local
 cd /home/pi/alex-assistant
-uv sync --dev
+# Install uv if not already present
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# If uv is not on PATH, use the absolute path below
+~/.local/bin/uv sync --dev
 ```
 
 ### Enable ALSA loopback (for Layer 4 tests)
@@ -24,12 +27,20 @@ sudo apt-get install -y alsa-utils
 sudo modprobe snd-aloop
 # Persist across reboots
 echo snd-aloop | sudo tee -a /etc/modules
-# Verify
+# Reboot so the Loopback card enumerates reliably
+sudo reboot
+# After reconnecting:
 arecord -l | cat
 aplay -l | cat
 ```
 
-You should see a device like `card X: Loopback` in the listings.
+You should see a device like `card X: Loopback` in the listings. If missing:
+```bash
+sudo modprobe -r snd-aloop || true
+sudo modprobe snd-aloop
+arecord -l | cat
+aplay -l | cat
+```
 
 ### Provide test audio fixtures
 Place these WAV files (16kHz recommended) in:
@@ -57,10 +68,11 @@ We support two modes:
 - Real Porcupine + real Gemini for full end-to-end
 
 ### 1) Self-contained mode (sanity check)
+This does not require the three WAV fixtures or API keys, but it still requires the `Loopback` card to be enumerated.
 ```bash
 ssh pi@raspberrypi.local 'cd /home/pi/alex-assistant && \
   ALEX_TEST_MODE=1 ALEX_FAKE_SESSION=1 ALEX_FAKE_WAKEWORD=1 ALEX_DISABLE_LEDS=1 ALEX_DISABLE_LIBRESPOT=1 \
-  uv run pytest -q tests/test_layer4_pi.py -s -vv'
+  ~/.local/bin/uv run -m pytest -q tests/test_layer4_pi.py -s -vv'
 ```
 
 ### 2) Real Porcupine + real Gemini
@@ -75,7 +87,7 @@ Run:
 ssh pi@raspberrypi.local 'cd /home/pi/alex-assistant && \
   export PICOVOICE_ACCESS_KEY=... && export GEMINI_API_KEY=... && \
   ALEX_TEST_MODE=0 ALEX_FAKE_SESSION=0 ALEX_FAKE_WAKEWORD=0 ALEX_DISABLE_LEDS=1 ALEX_DISABLE_LIBRESPOT=1 ALEX_INPUT_DEVICE_NAME=Loopback \
-  uv run pytest -q tests/test_layer4_scenarios.py -s -vv'
+  ~/.local/bin/uv run -m pytest -q tests/test_layer4_scenarios.py -s -vv'
 ```
 
 The tests will:
@@ -87,6 +99,7 @@ Artifacts:
 - `debug_unprocessed.wav` and `debug_processed.wav` will be saved in repo root when `--debug` is used.
 
 ## Troubleshooting
-- If `arecord -l` does not list Loopback, re-run `sudo modprobe snd-aloop` and ensure `/etc/modules` contains `snd-aloop`.
+- If `arecord -l` does not list Loopback, ensure `/etc/modules` contains `snd-aloop`, reboot, and if still missing try `sudo modprobe -r snd-aloop && sudo modprobe snd-aloop`.
 - For device selection, set `ALEX_INPUT_DEVICE_INDEX` or `ALEX_OUTPUT_DEVICE_INDEX` if name matching is unreliable.
 - If VLC/Spotify errors appear in tests, set `ALEX_TEST_MODE=1` or `ALEX_DISABLE_SPOTIFY=1`.
+- If `uv` is not found on the Pi, use `~/.local/bin/uv` or add `$HOME/.local/bin` to your PATH.
