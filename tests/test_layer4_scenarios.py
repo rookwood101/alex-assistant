@@ -95,6 +95,12 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         nonlocal app_proc
         local_env = dict(env)
         local_env["ALEX_FAKE_WAKEWORD"] = "1" if use_fake_wakeword else "0"
+        if use_fake_wakeword:
+            # Enable test mode so detect_wakeword fast-path triggers
+            local_env["ALEX_TEST_MODE"] = "1"
+        else:
+            # For real detection, increase Porcupine sensitivity further
+            local_env["ALEX_PORCUPINE_SENSITIVITY"] = "0.9"
 
         # Start the app
         app_proc = subprocess.Popen(
