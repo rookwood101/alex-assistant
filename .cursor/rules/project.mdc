@@ -9,5 +9,5 @@ alwaysApply: true
 * Use `ssh pi@raspberrypi.local` to connect and run commands on the raspberry pi. On the pi:
     - `uv` is setup
     - to get files onto the pi, you can commit & push your changes and then pull them on the raspberry pi (make sure you're both on the same branch!)
-    - do not mess with origin's git history! (non destructive operations only to the git remote)
+    - don't edit history on the main branch, pushing, pulling and merging only please!
     - alex-assistant (this repo) is already git cloned into /home/pi/alex-assistant
