@@ -59,19 +59,32 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         import pyaudio  # type: ignore
         pa = pyaudio.PyAudio()
         try:
-            loopback_input_index = None
+            # Print device list for debugging
+            print("[test] PyAudio devices:", flush=True)
+            for i in range(pa.get_device_count()):
+                info = pa.get_device_info_by_index(i)
+                print(f"[test] idx={i} name={info.get('name')} maxIn={info.get('maxInputChannels')} maxOut={info.get('maxOutputChannels')}", flush=True)
+
+            # Prefer a Loopback capture device that hints at subdevice 1 (paired with playback 0)
+            preferred = None
+            fallback = None
             for i in range(pa.get_device_count()):
                 info = pa.get_device_info_by_index(i)
                 name = str(info.get("name", ""))
                 if "loopback" in name.lower() and info.get("maxInputChannels", 0) > 0:
-                    loopback_input_index = i
-                    break
+                    if "1" in name or ",1" in name or "(1" in name:
+                        preferred = i
+                        break
+                    if fallback is None:
+                        fallback = i
+            loopback_input_index = preferred if preferred is not None else fallback
             if loopback_input_index is not None:
                 env["ALEX_INPUT_DEVICE_INDEX"] = str(loopback_input_index)
+                print(f"[test] Selected input idx={loopback_input_index}", flush=True)
         finally:
             pa.terminate()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[test] PyAudio enumeration failed: {e}", flush=True)
 
     # Start watchdog
     def _watchdog_timeout():
