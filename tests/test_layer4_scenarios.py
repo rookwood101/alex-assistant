@@ -1,5 +1,6 @@
 import os
 import platform
+import select
 import subprocess
 import sys
 import time
@@ -43,6 +44,7 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
             "ALEX_DISABLE_LIBRESPOT": "1",
             "ALEX_DISABLE_LEDS": "1",
             "ALEX_INPUT_DEVICE_NAME": "Loopback",
+            "ALEX_OUTPUT_DEVICE_NAME": "Loopback",
         }
     )
 
@@ -71,6 +73,11 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         try:
             if app_proc is not None and app_proc.poll() is None:
                 app_proc.terminate()
+                # Give a brief moment, then force kill to avoid lingering
+                try:
+                    app_proc.wait(timeout=3)
+                except Exception:
+                    app_proc.kill()
         except Exception:
             pass
 
@@ -94,7 +101,13 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
 
         # Feed wakeword, then question 1, then wakeword, then question 2
         def play(path: Path):
-            subprocess.run(["aplay", "-D", "plughw:Loopback,0", str(path)], check=True)
+            try:
+                subprocess.run(["aplay", "-D", "plughw:Loopback,0", str(path)], check=True, timeout=10)
+            except Exception:
+                try:
+                    subprocess.run(["aplay", str(path)], check=False, timeout=10)
+                except Exception:
+                    pass
 
         play(fixtures[0])  # wakeword
         time.sleep(1.2)
@@ -110,10 +123,14 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         lines = []
         assert app_proc.stdout is not None
         deadline = time.time() + 30.0
-        while time.time() < deadline:
-            line = app_proc.stdout.readline()
+        stdout = app_proc.stdout
+        assert stdout is not None
+        while time.time() < deadline and not timed_out["flag"]:
+            ready, _, _ = select.select([stdout], [], [], 0.2)
+            if not ready:
+                continue
+            line = stdout.readline()
             if not line:
-                time.sleep(0.1)
                 continue
             lines.append(line)
             if "Starting conversation..." in line:
