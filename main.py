@@ -486,7 +486,46 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
     if input_device_index is None and ALEX_INPUT_DEVICE_NAME:
         input_device_index = _find_device_index_by_name(ALEX_INPUT_DEVICE_NAME, True)
 
+    # Real-mode auto-detect: prefer seeed2micvoicec capture if not overridden
+    if input_device_index is None and not ALEX_TEST_MODE:
+        try:
+            print("[audio] Enumerating input devices for auto-detect:")
+            prefer_substrings = ["seeed2micvoicec", "seeed2mic"]
+            fallback_index: int | None = None
+            preferred_index: int | None = None
+            for idx in range(audio.get_device_count()):
+                info = audio.get_device_info_by_index(idx)
+                name = str(info.get("name", ""))
+                max_in = int(info.get("maxInputChannels", 0) or 0)
+                max_out = int(info.get("maxOutputChannels", 0) or 0)
+                print(f"[audio] idx={idx} name={name} maxIn={max_in} maxOut={max_out}")
+                if max_in > 0:
+                    lower = name.lower()
+                    if any(s in lower for s in prefer_substrings) and preferred_index is None:
+                        preferred_index = idx
+                    if fallback_index is None:
+                        fallback_index = idx
+            chosen = preferred_index if preferred_index is not None else fallback_index
+            if chosen is not None:
+                chosen_name = str(audio.get_device_info_by_index(chosen).get("name", ""))
+                print(f"[audio] Selected input device idx={chosen} name={chosen_name}")
+                input_device_index = chosen
+            else:
+                print("[audio] No input-capable device found; relying on system default")
+        except Exception as e:
+            print(f"[audio] Auto-detect failed: {e}")
+
     try:
+        # Log final selection before opening the stream
+        try:
+            if input_device_index is not None:
+                info = audio.get_device_info_by_index(input_device_index)
+                print(f"[audio] Opening input stream on idx={input_device_index} name={info.get('name')}")
+            else:
+                print("[audio] Opening input stream on default device (no index specified)")
+        except Exception:
+            pass
+
         stream = audio.open(
             format=FORMAT,
             channels=CHANNELS,
