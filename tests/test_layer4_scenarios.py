@@ -98,6 +98,8 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         if use_fake_wakeword:
             # Enable test mode so detect_wakeword fast-path triggers
             local_env["ALEX_TEST_MODE"] = "1"
+            # Also use fake session so conversation completes quickly without external dependencies
+            local_env["ALEX_FAKE_SESSION"] = "1"
         else:
             # For real detection, increase Porcupine sensitivity further
             local_env["ALEX_PORCUPINE_SENSITIVITY"] = "0.9"
