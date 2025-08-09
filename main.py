@@ -766,22 +766,28 @@ async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer:
             out_bytes = audio_data
             if selected_rate != BASE_SAMPLE_RATE:
                 try:
-                    from scipy.signal import resample_poly  # type: ignore
-                    mono = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
-                    # Rational approx for resample
-                    def rational_approx(src: int, dst: int) -> tuple[int, int]:
-                        best_u, best_d, best_err = 1, 1, 1e9
-                        for d in range(1, 161):
-                            u = round(dst * d / src)
-                            if u <= 0 or u > 256:
-                                continue
-                            err = abs(dst - src * u / d)
-                            if err < best_err:
-                                best_u, best_d, best_err = u, d, err
-                        return best_u, best_d
-                    up, down = rational_approx(BASE_SAMPLE_RATE, selected_rate)
-                    resampled = resample_poly(mono, up, down).astype(np.int16)
-                    out_bytes = resampled.tobytes()
+                    mono_i16 = np.frombuffer(audio_data, dtype=np.int16)
+                    if BASE_SAMPLE_RATE == 24000 and selected_rate == 48000:
+                        # Fast path: duplicate samples
+                        resampled_i16 = np.repeat(mono_i16, 2)
+                        out_bytes = resampled_i16.tobytes()
+                    else:
+                        from scipy.signal import resample_poly  # type: ignore
+                        mono = mono_i16.astype(np.float32)
+                        # Rational approx for resample
+                        def rational_approx(src: int, dst: int) -> tuple[int, int]:
+                            best_u, best_d, best_err = 1, 1, 1e9
+                            for d in range(1, 161):
+                                u = round(dst * d / src)
+                                if u <= 0 or u > 256:
+                                    continue
+                                err = abs(dst - src * u / d)
+                                if err < best_err:
+                                    best_u, best_d, best_err = u, d, err
+                            return best_u, best_d
+                        up, down = rational_approx(BASE_SAMPLE_RATE, selected_rate)
+                        resampled = resample_poly(mono, up, down).astype(np.int16)
+                        out_bytes = resampled.tobytes()
                 except Exception as e:
                     print(f"[audio] Resample failed {BASE_SAMPLE_RATE}->{selected_rate}: {e}")
                     out_bytes = audio_data
