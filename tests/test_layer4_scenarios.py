@@ -29,9 +29,7 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         assert f.exists(), f"Missing fixture: {f}"
 
     env = os.environ.copy()
-    # Require real Porcupine and real LLM
-    assert env.get("PICOVOICE_ACCESS_KEY"), "PICOVOICE_ACCESS_KEY not set"
-    assert env.get("GEMINI_API_KEY"), "GEMINI_API_KEY not set"
+    # PICOVOICE_ACCESS_KEY and GEMINI_API_KEY are loaded by main.py via dotenv (.env)
 
     env.update(
         {

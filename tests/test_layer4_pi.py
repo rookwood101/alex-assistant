@@ -41,6 +41,7 @@ def test_layer4_two_cycles_with_alsa_loopback(tmp_path: Path):
     env.setdefault("ALEX_FAKE_SESSION", "1")
     env.setdefault("ALEX_FAKE_WAKEWORD", "1")
     env.setdefault("ALEX_DISABLE_LIBRESPOT", "1")
+    env.setdefault("ALEX_DISABLE_LEDS", "1")
     # Ensure PyAudio input uses the ALSA loopback capture
     env.setdefault("ALEX_INPUT_DEVICE_NAME", "Loopback")
 

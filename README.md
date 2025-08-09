@@ -68,27 +68,27 @@ We support two modes:
 - Real Porcupine + real Gemini for full end-to-end
 
 ### 1) Self-contained mode (sanity check)
-This does not require the three WAV fixtures or API keys, but it still requires the `Loopback` card to be enumerated.
+This does not require the three WAV fixtures or API keys, but it still requires the `Loopback` card to be enumerated. The tests set `ALEX_*` flags internally, so you don't need to pass them on the command line.
 ```bash
-ssh pi@raspberrypi.local 'cd /home/pi/alex-assistant && \
-  ALEX_TEST_MODE=1 ALEX_FAKE_SESSION=1 ALEX_FAKE_WAKEWORD=1 ALEX_DISABLE_LEDS=1 ALEX_DISABLE_LIBRESPOT=1 \
-  ~/.local/bin/uv run -m pytest -q tests/test_layer4_pi.py -s -vv'
+ssh pi@raspberrypi.local 'cd /home/pi/alex-assistant && ~/.local/bin/uv run -m pytest -q tests/test_layer4_pi.py -s -vv'
 ```
 
 ### 2) Real Porcupine + real Gemini
 Requirements:
-- `PICOVOICE_ACCESS_KEY` exported in the environment
-- `GEMINI_API_KEY` exported in the environment
+- A `.env` file at the repository root with:
+  - `PICOVOICE_ACCESS_KEY=...`
+  - `GEMINI_API_KEY=...`
 - Loopback enabled and visible
 - WAV fixtures present under `tests/layer4/`
 
 Run:
 ```bash
-ssh pi@raspberrypi.local 'cd /home/pi/alex-assistant && \
-  export PICOVOICE_ACCESS_KEY=... && export GEMINI_API_KEY=... && \
-  ALEX_TEST_MODE=0 ALEX_FAKE_SESSION=0 ALEX_FAKE_WAKEWORD=0 ALEX_DISABLE_LEDS=1 ALEX_DISABLE_LIBRESPOT=1 ALEX_INPUT_DEVICE_NAME=Loopback \
-  ~/.local/bin/uv run -m pytest -q tests/test_layer4_scenarios.py -s -vv'
+ssh pi@raspberrypi.local 'cd /home/pi/alex-assistant && ~/.local/bin/uv run -m pytest -q tests/test_layer4_scenarios.py -s -vv'
 ```
+
+Notes:
+- The test sets the necessary `ALEX_*` configuration (including input device selection) when spawning the app.
+- The application automatically loads `PICOVOICE_ACCESS_KEY` and `GEMINI_API_KEY` from `.env`.
 
 The tests will:
 - Feed `wakeword.wav` followed by each prompt WAV via `aplay -D plughw:Loopback,0`
