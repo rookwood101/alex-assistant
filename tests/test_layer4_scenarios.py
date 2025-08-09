@@ -91,18 +91,11 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
     watchdog.daemon = True
     watchdog.start()
 
-    def perform_run(use_fake_wakeword: bool) -> tuple[int, int, list[str]]:
+    def perform_run() -> tuple[int, int, list[str]]:
         nonlocal app_proc
         local_env = dict(env)
-        local_env["ALEX_FAKE_WAKEWORD"] = "1" if use_fake_wakeword else "0"
-        if use_fake_wakeword:
-            # Enable test mode so detect_wakeword fast-path triggers
-            local_env["ALEX_TEST_MODE"] = "1"
-            # Also use fake session so conversation completes quickly without external dependencies
-            local_env["ALEX_FAKE_SESSION"] = "1"
-        else:
-            # For real detection, increase Porcupine sensitivity further
-            local_env["ALEX_PORCUPINE_SENSITIVITY"] = "0.9"
+        # For real detection, increase Porcupine sensitivity further
+        local_env["ALEX_PORCUPINE_SENSITIVITY"] = "0.9"
 
         # Start the app
         app_proc = subprocess.Popen(
@@ -128,21 +121,16 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
                     except Exception:
                         pass
 
-            if not use_fake_wakeword:
-                for _ in range(5):
-                    play(fixtures[0])
-                    time.sleep(0.8)
-                play(fixtures[1])
-                time.sleep(3.0)
-                for _ in range(5):
-                    play(fixtures[0])
-                    time.sleep(0.8)
-                play(fixtures[2])
-            else:
-                # Fake wakeword: just play the two prompts
-                play(fixtures[1])
-                time.sleep(3.0)
-                play(fixtures[2])
+            # Play wake word once before each prompt
+            print("[test] Playing wakeword then first prompt...", flush=True)
+            play(fixtures[0])
+            time.sleep(0.8)
+            play(fixtures[1])
+            time.sleep(3.0)
+            print("[test] Playing wakeword then second prompt...", flush=True)
+            play(fixtures[0])
+            time.sleep(0.8)
+            play(fixtures[2])
 
             # Collect output and look for completions
             starts = 0
@@ -160,6 +148,11 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
                 if not line:
                     continue
                 lines.append(line)
+                # Echo every line so we can eyeball model replies
+                try:
+                    print(line, end="", flush=True)
+                except Exception:
+                    pass
                 if "Starting conversation..." in line:
                     starts += 1
                 if "Goodbye!" in line:
@@ -177,18 +170,15 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
                 if app_proc is not None:
                     app_proc.kill()
 
-    # First attempt: real wakeword
-    s1, g1, lines1 = perform_run(use_fake_wakeword=False)
-    if s1 < 2 or g1 < 2:
-        # Second attempt: fake wakeword but still real LLM
-        s2, g2, lines2 = perform_run(use_fake_wakeword=True)
-        if s2 < 2 or g2 < 2:
-            if timed_out["flag"]:
-                pytest.fail("Layer 4 scenario test timed out after 120 seconds")
-            all_output = "".join(lines1 + ["\n--- fallback run ---\n"] + lines2)
-            pytest.fail(
-                f"Did not observe two conversations. real: starts={s1}, goodbyes={g1}; fallback: starts={s2}, goodbyes={g2}. Output: {all_output}"
-            )
+    # Single attempt: real wakeword only
+    s, g, lines_out = perform_run()
+    if s < 2 or g < 2:
+        if timed_out["flag"]:
+            pytest.fail("Layer 4 scenario test timed out after 120 seconds")
+        all_output = "".join(lines_out)
+        pytest.fail(
+            f"Did not observe two conversations. starts={s}, goodbyes={g}. Output: {all_output}"
+        )
     # Cancel watchdog
     try:
         watchdog.cancel()
