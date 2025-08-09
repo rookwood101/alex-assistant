@@ -97,7 +97,7 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         # For real detection, increase Porcupine sensitivity further
         local_env["ALEX_PORCUPINE_SENSITIVITY"] = "0.95"
 
-        # Start the app
+            # Start the app
         app_proc = subprocess.Popen(
             [sys.executable, "-u", "main.py", "--debug"],
             stdout=subprocess.PIPE,
@@ -108,8 +108,25 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         )
 
         try:
-            # Allow app to initialize (PyAudio, VAD, client)
-            time.sleep(4.0)
+                # Wait for readiness line before sending audio
+                lines: list[str] = []
+                assert app_proc.stdout is not None
+                ready_deadline = time.time() + 20.0
+                stdout = app_proc.stdout
+                while time.time() < ready_deadline and not timed_out["flag"]:
+                    ready, _, _ = select.select([stdout], [], [], 0.2)
+                    if not ready:
+                        continue
+                    line = stdout.readline()
+                    if not line:
+                        continue
+                    lines.append(line)
+                    try:
+                        print(line, end="", flush=True)
+                    except Exception:
+                        pass
+                    if "Listening for wake word (porcupine)..." in line:
+                        break
 
             # Feed audio
             def play(path: Path):
@@ -137,12 +154,10 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
             goodbyes = 0
             porcupine_lines = 0
             you_lines = 0
-            lines: list[str] = []
-            assert app_proc.stdout is not None
-            # Give time for end-to-end behavior to occur
-            deadline = time.time() + 45.0
-            stdout = app_proc.stdout
-            assert stdout is not None
+                # Continue reading
+                assert app_proc.stdout is not None
+                deadline = time.time() + 60.0
+                stdout = app_proc.stdout
             while time.time() < deadline and not timed_out["flag"]:
                 ready, _, _ = select.select([stdout], [], [], 0.2)
                 if not ready:
