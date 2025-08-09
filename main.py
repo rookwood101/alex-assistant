@@ -733,6 +733,7 @@ async def run_conversation(
             input_text = ""
             output_text = ""
             turn_completed = False
+            audio_emitted = False
             async for chunk in session.receive():
                 if chunk.tool_call and chunk.tool_call.function_calls:
                     function_responses = []
@@ -772,6 +773,7 @@ async def run_conversation(
                             concatenated_data += part.inline_data.data
                     if concatenated_data:
                         audio_output_queue.put_nowait(concatenated_data)
+                        audio_emitted = True
                 if chunk.server_content and chunk.server_content.turn_complete:
                     while not audio_output_queue.empty():
                         audio_output_queue.get_nowait()
@@ -780,7 +782,10 @@ async def run_conversation(
                     break
 
             print("You: ", input_text)
-            print("Porcupine: ", output_text)
+            if output_text.strip():
+                print("Porcupine: ", output_text)
+            elif audio_emitted:
+                print("Porcupine: (audio only)")
 
             if output_text.strip().endswith(".") or turn_completed:
                 print("Goodbye!")
