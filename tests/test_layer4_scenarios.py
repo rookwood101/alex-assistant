@@ -6,6 +6,7 @@ import sys
 import time
 import threading
 from pathlib import Path
+from dotenv import dotenv_values
 
 import pytest
 
@@ -34,7 +35,10 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         assert f.exists(), f"Missing fixture: {f}"
 
     env = os.environ.copy()
-    # PICOVOICE_ACCESS_KEY and GEMINI_API_KEY are loaded by main.py via dotenv (.env)
+    # Require keys to be present in .env, otherwise skip (not a failure of the test logic)
+    config = dotenv_values(str((Path(__file__).resolve().parents[1] / ".env")))
+    if not config.get("PICOVOICE_ACCESS_KEY") or not config.get("GEMINI_API_KEY"):
+        pytest.skip("PICOVOICE_ACCESS_KEY and/or GEMINI_API_KEY missing in .env; skipping real end-to-end scenario")
 
     env.update(
         {
