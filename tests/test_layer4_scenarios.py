@@ -108,20 +108,20 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         # Feed wakeword, then question 1, then wakeword, then question 2
         def play(path: Path):
             try:
-                subprocess.run(["aplay", "-D", "plughw:Loopback,0", str(path)], check=True, timeout=10)
+                subprocess.run(["aplay", "-D", "plughw:Loopback,0", "-r", "16000", "-f", "S16_LE", "-c", "2", str(path)], check=True, timeout=10)
             except Exception:
                 try:
-                    subprocess.run(["aplay", str(path)], check=False, timeout=10)
+                    subprocess.run(["aplay", "-r", "16000", "-f", "S16_LE", "-c", "2", str(path)], check=False, timeout=10)
                 except Exception:
                     pass
 
         # Play wakeword multiple times to improve detection robustness
-        for _ in range(3):
+        for _ in range(5):
             play(fixtures[0])
             time.sleep(0.8)
         play(fixtures[1])  # question 1
         time.sleep(3.0)
-        for _ in range(3):
+        for _ in range(5):
             play(fixtures[0])
             time.sleep(0.8)
         play(fixtures[2])  # question 2
