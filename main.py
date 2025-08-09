@@ -656,7 +656,7 @@ async def send_audio_to_gemini(session: AsyncSession, audio_input_queue: asyncio
 
 
 async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer: list):
-    SAMPLE_RATE = 24000
+    BASE_SAMPLE_RATE = 24000  # Model output rate
     FORMAT = pyaudio.paInt16
 
     def _find_device_index_by_name(name_substr: str, want_input: bool) -> int | None:
@@ -720,20 +720,38 @@ async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer:
             max_out = int(info.get("maxOutputChannels", 0) or 0)
             if max_out >= 2:
                 output_channels = 2
-            print(f"[audio] Opening output stream on idx={output_device_index} name={info.get('name')} channels={output_channels}")
-        else:
-            print(f"[audio] Opening output stream on default device channels={output_channels}")
     except Exception:
         pass
 
+    # Try opening at 24k, then fall back to common rates if device rejects
+    selected_rate: int | None = None
+    stream = None
+    last_error: Exception | None = None
+    for candidate_rate in [BASE_SAMPLE_RATE, 48000, 44100, 32000, 16000]:
+        try:
+            if output_device_index is not None:
+                info = audio.get_device_info_by_index(output_device_index)
+                print(f"[audio] Opening output stream on idx={output_device_index} name={info.get('name')} channels={output_channels} rate={candidate_rate}")
+            else:
+                print(f"[audio] Opening output stream on default device channels={output_channels} rate={candidate_rate}")
+            stream = audio.open(
+                format=FORMAT,
+                channels=output_channels,
+                rate=candidate_rate,
+                output=True,
+                output_device_index=output_device_index,
+            )
+            selected_rate = candidate_rate
+            break
+        except Exception as e:
+            last_error = e
+            print(f"[audio] Failed to open output at {candidate_rate} Hz: {e}")
+            continue
+
+    if stream is None or selected_rate is None:
+        raise last_error if last_error else RuntimeError("[audio] Failed to open output stream")
+
     try:
-        stream = audio.open(
-            format=FORMAT,
-            channels=output_channels,
-            rate=SAMPLE_RATE,
-            output=True,
-            output_device_index=output_device_index,
-        )
         while True:
             audio_data = await audio_output_queue.get()
 
@@ -744,15 +762,38 @@ async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer:
                 if len(echo_reference_buffer) > echo_buffer_size:
                     echo_reference_buffer.pop(0)
 
-            # Upmix to stereo if needed
+            # Resample if device rate differs from model base rate
             out_bytes = audio_data
+            if selected_rate != BASE_SAMPLE_RATE:
+                try:
+                    from scipy.signal import resample_poly  # type: ignore
+                    mono = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32)
+                    # Rational approx for resample
+                    def rational_approx(src: int, dst: int) -> tuple[int, int]:
+                        best_u, best_d, best_err = 1, 1, 1e9
+                        for d in range(1, 161):
+                            u = round(dst * d / src)
+                            if u <= 0 or u > 256:
+                                continue
+                            err = abs(dst - src * u / d)
+                            if err < best_err:
+                                best_u, best_d, best_err = u, d, err
+                        return best_u, best_d
+                    up, down = rational_approx(BASE_SAMPLE_RATE, selected_rate)
+                    resampled = resample_poly(mono, up, down).astype(np.int16)
+                    out_bytes = resampled.tobytes()
+                except Exception as e:
+                    print(f"[audio] Resample failed {BASE_SAMPLE_RATE}->{selected_rate}: {e}")
+                    out_bytes = audio_data
+
+            # Upmix to stereo if needed
             if output_channels == 2:
                 try:
-                    mono = np.frombuffer(audio_data, dtype=np.int16)
+                    mono = np.frombuffer(out_bytes, dtype=np.int16)
                     stereo = np.repeat(mono, 2)
                     out_bytes = stereo.tobytes()
                 except Exception:
-                    out_bytes = audio_data
+                    pass
 
             await asyncio.to_thread(stream.write, out_bytes, exception_on_underflow=False)
     finally:
