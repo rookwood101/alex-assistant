@@ -657,7 +657,6 @@ async def send_audio_to_gemini(session: AsyncSession, audio_input_queue: asyncio
 
 async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer: list):
     SAMPLE_RATE = 24000
-    CHANNELS = 1
     FORMAT = pyaudio.paInt16
 
     def _find_device_index_by_name(name_substr: str, want_input: bool) -> int | None:
@@ -684,10 +683,53 @@ async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer:
     if output_device_index is None and ALEX_OUTPUT_DEVICE_NAME:
         output_device_index = _find_device_index_by_name(ALEX_OUTPUT_DEVICE_NAME, False)
 
+    # Real-mode auto-detect: prefer UACDemoV1.0 (USB Audio) if not overridden
+    if output_device_index is None and not ALEX_TEST_MODE:
+        try:
+            print("[audio] Enumerating output devices for auto-detect:")
+            prefer_substrings = ["uacdemov1.0", "usb audio"]
+            fallback_index: int | None = None
+            preferred_index: int | None = None
+            for idx in range(audio.get_device_count()):
+                info = audio.get_device_info_by_index(idx)
+                name = str(info.get("name", ""))
+                max_in = int(info.get("maxInputChannels", 0) or 0)
+                max_out = int(info.get("maxOutputChannels", 0) or 0)
+                print(f"[audio] idx={idx} name={name} maxIn={max_in} maxOut={max_out}")
+                if max_out > 0:
+                    lower = name.lower()
+                    if any(s in lower for s in prefer_substrings) and preferred_index is None:
+                        preferred_index = idx
+                    if fallback_index is None:
+                        fallback_index = idx
+            chosen = preferred_index if preferred_index is not None else fallback_index
+            if chosen is not None:
+                chosen_name = str(audio.get_device_info_by_index(chosen).get("name", ""))
+                print(f"[audio] Selected output device idx={chosen} name={chosen_name}")
+                output_device_index = chosen
+            else:
+                print("[audio] No output-capable device found; relying on system default")
+        except Exception as e:
+            print(f"[audio] Output auto-detect failed: {e}")
+
+    # Decide output channel count (prefer stereo if supported)
+    output_channels = 1
+    try:
+        if output_device_index is not None:
+            info = audio.get_device_info_by_index(output_device_index)
+            max_out = int(info.get("maxOutputChannels", 0) or 0)
+            if max_out >= 2:
+                output_channels = 2
+            print(f"[audio] Opening output stream on idx={output_device_index} name={info.get('name')} channels={output_channels}")
+        else:
+            print(f"[audio] Opening output stream on default device channels={output_channels}")
+    except Exception:
+        pass
+
     try:
         stream = audio.open(
             format=FORMAT,
-            channels=CHANNELS,
+            channels=output_channels,
             rate=SAMPLE_RATE,
             output=True,
             output_device_index=output_device_index,
@@ -702,7 +744,17 @@ async def output_audio(audio_output_queue: asyncio.Queue, echo_reference_buffer:
                 if len(echo_reference_buffer) > echo_buffer_size:
                     echo_reference_buffer.pop(0)
 
-            await asyncio.to_thread(stream.write, audio_data, exception_on_underflow=False)
+            # Upmix to stereo if needed
+            out_bytes = audio_data
+            if output_channels == 2:
+                try:
+                    mono = np.frombuffer(audio_data, dtype=np.int16)
+                    stereo = np.repeat(mono, 2)
+                    out_bytes = stereo.tobytes()
+                except Exception:
+                    out_bytes = audio_data
+
+            await asyncio.to_thread(stream.write, out_bytes, exception_on_underflow=False)
     finally:
         stream.stop_stream()
         stream.close()
