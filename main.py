@@ -502,9 +502,21 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
             # Record unprocessed audio for debug
             debug_recorder.record_unprocessed(audio_data)
 
-            # If bypass flag is set, feed raw audio directly (helps wakeword reliability in tests)
+            # If bypass flag is set, feed minimally processed mono audio directly
             if ALEX_BYPASS_AUDIO_PROCESSING:
-                audio_input_queue.put_nowait(audio_data)
+                if ENABLE_DUAL_CHANNEL:
+                    # Convert interleaved stereo to mono by selecting left channel
+                    audio_np = np.frombuffer(audio_data, dtype=np.int16)
+                    if audio_np.size >= 2:
+                        try:
+                            mono = audio_np.reshape(-1, 2)[:, 0]
+                            audio_input_queue.put_nowait(mono.tobytes())
+                        except Exception:
+                            audio_input_queue.put_nowait(audio_data)
+                    else:
+                        audio_input_queue.put_nowait(audio_data)
+                else:
+                    audio_input_queue.put_nowait(audio_data)
                 continue
 
             # STEP 1: Apply echo cancellation first
