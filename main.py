@@ -732,6 +732,7 @@ async def run_conversation(
         while True:
             input_text = ""
             output_text = ""
+            turn_completed = False
             async for chunk in session.receive():
                 if chunk.tool_call and chunk.tool_call.function_calls:
                     function_responses = []
@@ -774,11 +775,14 @@ async def run_conversation(
                 if chunk.server_content and chunk.server_content.turn_complete:
                     while not audio_output_queue.empty():
                         audio_output_queue.get_nowait()
+                    # Mark turn completed to ensure we finish the conversation loop
+                    turn_completed = True
+                    break
 
             print("You: ", input_text)
             print("Porcupine: ", output_text)
 
-            if output_text.strip().endswith("."):
+            if output_text.strip().endswith(".") or turn_completed:
                 print("Goodbye!")
                 break
     finally:
