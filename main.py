@@ -505,11 +505,12 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
             # If bypass flag is set, feed minimally processed mono audio directly
             if ALEX_BYPASS_AUDIO_PROCESSING:
                 if ENABLE_DUAL_CHANNEL:
-                    # Convert interleaved stereo to mono by selecting left channel
+                    # Convert interleaved stereo to mono by averaging channels
                     audio_np = np.frombuffer(audio_data, dtype=np.int16)
                     if audio_np.size >= 2:
                         try:
-                            mono = audio_np.reshape(-1, 2)[:, 0]
+                            stereo = audio_np.reshape(-1, 2)
+                            mono = ((stereo[:, 0].astype(np.int32) + stereo[:, 1].astype(np.int32)) // 2).astype(np.int16)
                             audio_input_queue.put_nowait(mono.tobytes())
                         except Exception:
                             audio_input_queue.put_nowait(audio_data)
