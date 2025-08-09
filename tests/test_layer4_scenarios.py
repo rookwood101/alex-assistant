@@ -91,7 +91,7 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
     watchdog.daemon = True
     watchdog.start()
 
-    def perform_run() -> list[str]:
+    def perform_run() -> tuple[int, int, int, int, list[str]]:
         nonlocal app_proc
         local_env = dict(env)
         # For real detection, increase Porcupine sensitivity further
@@ -133,6 +133,10 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
             play(fixtures[2])
 
             # Collect output and look for completions
+            starts = 0
+            goodbyes = 0
+            porcupine_lines = 0
+            you_lines = 0
             lines: list[str] = []
             assert app_proc.stdout is not None
             # Give time for end-to-end behavior to occur
@@ -152,7 +156,17 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
                     print(line, end="", flush=True)
                 except Exception:
                     pass
-            return lines
+                if "Starting conversation..." in line:
+                    starts += 1
+                if "Goodbye!" in line:
+                    goodbyes += 1
+                if line.startswith("Porcupine:"):
+                    porcupine_lines += 1
+                if line.startswith("You:"):
+                    you_lines += 1
+                if starts >= 2 and goodbyes >= 2 and porcupine_lines >= 1 and you_lines >= 1:
+                    break
+            return starts, goodbyes, porcupine_lines, you_lines, lines
         finally:
             try:
                 if app_proc is not None and app_proc.poll() is None:
@@ -162,9 +176,13 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
                 if app_proc is not None:
                     app_proc.kill()
 
-    # Single attempt: real wakeword only (observational; non-deterministic)
-    lines_out = perform_run()
-    # No hard assertions; stdout is printed above for manual inspection
+    # Single attempt: real wakeword only
+    starts, goodbyes, porcupine_lines, you_lines, lines_out = perform_run()
+    if starts < 2 or goodbyes < 2 or porcupine_lines < 1 or you_lines < 1:
+        all_output = "".join(lines_out)
+        pytest.fail(
+            f"Expected interactions missing. starts={starts}, goodbyes={goodbyes}, porcupine_lines={porcupine_lines}, you_lines={you_lines}. Output: {all_output}"
+        )
     # Cancel watchdog
     try:
         watchdog.cancel()
