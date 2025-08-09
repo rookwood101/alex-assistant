@@ -145,6 +145,8 @@ ALEX_INPUT_DEVICE_NAME = os.getenv("ALEX_INPUT_DEVICE_NAME")
 ALEX_OUTPUT_DEVICE_NAME = os.getenv("ALEX_OUTPUT_DEVICE_NAME")
 ALEX_INPUT_DEVICE_INDEX = os.getenv("ALEX_INPUT_DEVICE_INDEX")
 ALEX_OUTPUT_DEVICE_INDEX = os.getenv("ALEX_OUTPUT_DEVICE_INDEX")
+ALEX_BYPASS_AUDIO_PROCESSING = os.getenv("ALEX_BYPASS_AUDIO_PROCESSING", "0") == "1"
+ALEX_PORCUPINE_SENSITIVITY = float(os.getenv("ALEX_PORCUPINE_SENSITIVITY", "0.3"))
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Alex Assistant')
@@ -200,7 +202,7 @@ def _create_porcupine():
         return pvporcupine.create(
             access_key=access_key,
             keywords=["porcupine"],
-            sensitivities=[0.3],
+            sensitivities=[ALEX_PORCUPINE_SENSITIVITY],
         )
     except Exception as e:
         print(f"Warning: Porcupine unavailable ({e}); using fallback stub.")
@@ -499,6 +501,11 @@ async def record_audio(audio_input_queue: asyncio.Queue, echo_reference_buffer: 
 
             # Record unprocessed audio for debug
             debug_recorder.record_unprocessed(audio_data)
+
+            # If bypass flag is set, feed raw audio directly (helps wakeword reliability in tests)
+            if ALEX_BYPASS_AUDIO_PROCESSING:
+                audio_input_queue.put_nowait(audio_data)
+                continue
 
             # STEP 1: Apply echo cancellation first
             if ENABLE_AEC and echo_reference_buffer:

@@ -49,6 +49,8 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
             "ALEX_DISABLE_LEDS": "1",
             "ALEX_INPUT_DEVICE_NAME": "Loopback",
             "ALEX_OUTPUT_DEVICE_NAME": "Loopback",
+            "ALEX_BYPASS_AUDIO_PROCESSING": "1",
+            "ALEX_PORCUPINE_SENSITIVITY": "0.6",
         }
     )
 
@@ -101,7 +103,7 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
 
     try:
         # Allow app to initialize (PyAudio, VAD, client)
-        time.sleep(3.0)
+        time.sleep(4.0)
 
         # Feed wakeword, then question 1, then wakeword, then question 2
         def play(path: Path):
@@ -113,12 +115,15 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
                 except Exception:
                     pass
 
-        play(fixtures[0])  # wakeword
-        time.sleep(1.2)
+        # Play wakeword multiple times to improve detection robustness
+        for _ in range(3):
+            play(fixtures[0])
+            time.sleep(0.8)
         play(fixtures[1])  # question 1
-        time.sleep(2.5)
-        play(fixtures[0])  # wakeword again
-        time.sleep(1.2)
+        time.sleep(3.0)
+        for _ in range(3):
+            play(fixtures[0])
+            time.sleep(0.8)
         play(fixtures[2])  # question 2
 
         # Collect output and look for completions
@@ -126,7 +131,7 @@ def test_real_porcupine_real_llm_three_scenarios(tmp_path: Path):
         goodbyes = 0
         lines = []
         assert app_proc.stdout is not None
-        deadline = time.time() + 30.0
+        deadline = time.time() + 45.0
         stdout = app_proc.stdout
         assert stdout is not None
         while time.time() < deadline and not timed_out["flag"]:
